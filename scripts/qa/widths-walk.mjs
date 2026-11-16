@@ -1,6 +1,8 @@
-// Walk: at every width from a phone to a wide desktop, every button label fits on one line with its
-// spaces, every dropdown chevron sits level with its label, and the header menu stays clear of the
-// search, account and cart icons, and no picture is drawn at a different shape from its file.
+// Walk: at every width from a small phone to a 2560 screen, every button label fits on one line with
+// its spaces, every dropdown chevron sits level with its label, the header menu stays clear of the
+// search, account and cart icons, no picture is drawn at a different shape from its file, no photo
+// leaves a gap in the frame it is meant to fill, and the page never scrolls sideways.
+// WIDTH_SHOTS=<folder> also saves the top of each page at every width, to look at before reporting.
 //
 // Exists because the other walks measure 390px and 1440px only, and on one build every one of
 // these reached the client between those widths: a button squeezed onto two lines at a 1000px
@@ -18,7 +20,9 @@ import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-export const WIDTHS = [390, 768, 990, 1024, 1100, 1180, 1280, 1366, 1440, 1920];
+// Phones to large tablets as well as laptops: a hero photo sized for 390px left bands down both
+// sides from about 420px to 767px on one build, and no width between 390 and 768 was checked.
+export const WIDTHS = [320, 360, 390, 414, 480, 540, 600, 640, 700, 767, 768, 820, 900, 990, 1024, 1100, 1180, 1280, 1300, 1366, 1440, 1600, 1920, 2560];
 const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
 
 function pagesToCheck() {
@@ -122,6 +126,39 @@ export function squashedImages() {
   return out;
 }
 
+// Runs in the page: photos that leave a gap in the frame they fill. A positioned photo covering most
+// of a clipped frame (a hero slide, a tile, a banner) must cover all of it: on one build the phone
+// hero photo was sized by height, so on large phones it stopped short and left bands down both
+// sides. Contained pictures (product shots, logos) are left alone, and so is a photo that covers
+// under 60% of its frame (one placed beside text on purpose). data-qa-partial opts a photo out.
+export function uncoveredPhotos() {
+  const out = [];
+  for (const img of document.querySelectorAll("img")) {
+    if (!img.getClientRects().length || !img.complete || !img.naturalWidth || img.closest("[data-qa-partial]")) continue;
+    const cs = getComputedStyle(img);
+    if (cs.visibility === "hidden" || cs.display === "none" || cs.objectFit === "contain" || cs.objectFit === "scale-down") continue;
+    if (cs.position !== "absolute" && cs.position !== "fixed") continue;
+    let frame = img.parentElement;
+    while (frame && frame !== document.body && getComputedStyle(frame).overflow.indexOf("hidden") < 0 && getComputedStyle(frame).overflow.indexOf("clip") < 0) frame = frame.parentElement;
+    if (!frame || frame === document.body) continue;
+    // a slide or panel that is faded out is not on screen
+    let seen = true;
+    for (let e = img; e && e !== frame.parentElement; e = e.parentElement) if (+getComputedStyle(e).opacity === 0) { seen = false; break; }
+    if (!seen) continue;
+    const f = frame.getBoundingClientRect(), r = img.getBoundingClientRect();
+    if (f.width < 80 || f.height < 80) continue;
+    const ix = Math.max(0, Math.min(f.right, r.right) - Math.max(f.left, r.left));
+    const iy = Math.max(0, Math.min(f.bottom, r.bottom) - Math.max(f.top, r.top));
+    if ((ix * iy) / (f.width * f.height) < 0.6) continue;
+    const gaps = [["left", r.left - f.left], ["right", f.right - r.right], ["top", r.top - f.top], ["bottom", f.bottom - r.bottom]].filter(([, g]) => g > 2);
+    if (!gaps.length) continue;
+    let name = img.getAttribute("alt") || "";
+    try { const u = new URL(img.currentSrc || img.src); if (/^https?:$/.test(u.protocol)) name = u.pathname.split("/").pop() || name; } catch {}
+    out.push(`${(name || "(no name)").slice(0, 50)} leaves ${gaps.map(([s, g]) => `${Math.round(g)}px at the ${s}`).join(", ")}`);
+  }
+  return out;
+}
+
 // Runs in the page: flex boxes whose words run together. Flex drops the spaces between a text run
 // and an inline element (a price from the money filter prints its own <span>), so "Around $530"
 // rendered as "AROUND$530". Measured on screen: a space in the source must leave a gap.
@@ -176,6 +213,15 @@ async function main() {
         for (const msg of await page.evaluate(headerClash)) (found[msg] ||= []).push(w);
         for (const label of new Set(await page.evaluate(joinedWords))) (found[`"${label}" has words run together`] ||= []).push(w);
         for (const name of new Set(await page.evaluate(squashedImages))) (found[`picture squashed: ${name}`] ||= []).push(w);
+        for (const msg of new Set(await page.evaluate(uncoveredPhotos))) (found[`photo gap: ${msg.replace(/\d+px/g, "Npx")}`] ||= []).push(w);
+        const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        if (wide > 1) (found["page scrolls sideways"] ||= []).push(w);
+        if (process.env.WIDTH_SHOTS) {
+          const { mkdirSync } = await import("node:fs");
+          mkdirSync(process.env.WIDTH_SHOTS, { recursive: true });
+          const slug = (path.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "home").slice(0, 60);
+          await page.screenshot({ path: join(process.env.WIDTH_SHOTS, `${slug}-${String(w).padStart(4, "0")}.png`) });
+        }
       }
       const bad = Object.entries(found);
       fails += bad.length;

@@ -240,7 +240,7 @@ npm run parity -- <name>              # only states whose name contains <name>, 
 npm run carryover                     # what the live theme does that the new build must keep, before building and in every deploy
 npm run seo                           # on-page SEO on the preview, one page per type, before every handover
 npm run a11y                          # WCAG 2.2 AA (axe-core) on the preview, phone and desktop, before every handover
-npm run widths                        # buttons, chevrons and the header at ten widths, 390px to 1920px
+npm run widths                        # buttons, chevrons, header, photo gaps, sideways scroll at 24 widths, 320px to 2560px
 npm run visual                        # every page at four widths against the last approved screenshots
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
@@ -466,9 +466,16 @@ Each of these reached a client review once. They are here so they reach nobody e
 
 - **Phones and 1440px are not the only screens.** Laptops (990px to 1400px) and tablets (768px)
   are where a split section squeezes its text column and a long header menu runs into the icons.
-  `npm run widths` measures ten widths on every page in `design/seo-pages.json`. On one build a
-  button broke over two lines at 1000px and the menu sat under the search icon from 768px to
-  1180px, and every check at 390px and 1440px passed.
+  `npm run widths` measures 24 widths, 320px to 2560px, on every page in `design/seo-pages.json`.
+  On one build a button broke over two lines at 1000px and the menu sat under the search icon from
+  768px to 1180px, and every check at 390px and 1440px passed. On another, a hero photo sized for a
+  390px phone left bands down both sides from 540px to 767px (large phones, small tablets), a width
+  range the walk did not visit until then.
+- **Look at every width yourself before a preview link goes to anyone.** The walk measures what it
+  can name (a photo gap, a wrapped button, sideways scroll), not whether a layout looks right: on
+  the same build a photo shrank into a corner under empty sky at tablet widths and passed every
+  check. Run it with `WIDTH_SHOTS=<folder>` and look at the top of every page at every width, and
+  never hand over a preview from a deploy run with `--skip-walks`.
 - **An accessibility fix is a visual change.** Growing a control to the 24px WCAG target moves
   anything Horizon positions with `translateY(-50%)` by half the new height: a menu chevron rose
   12px. Changing a Horizon component's markup (a `<ul>` to a `<div>` with `role="list"`) can break
