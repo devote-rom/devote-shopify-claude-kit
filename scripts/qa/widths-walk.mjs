@@ -40,6 +40,8 @@ function wrappedButtons(selector) {
     if (!b.getClientRects().length || !b.textContent.trim()) return false;
     const cs = getComputedStyle(b);
     if (cs.visibility === "hidden" || cs.display === "none") return false;
+    // a skip link or screen-reader label hidden with clip (shown only on keyboard focus) is not seen
+    if (/rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)/.test(cs.clip) || /inset\(50%\)/.test(cs.clipPath)) return false;
     // Only text a sighted visitor sees: a screen-reader label clipped to 1px wraps by design.
     const seen = (el) => { for (let e = el; e && e !== b.parentElement; e = e.parentElement) { const r = e.getBoundingClientRect(); if (r.width <= 2 || r.height <= 2 || +getComputedStyle(e).opacity === 0) return false; } return true; };
     const walker = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
