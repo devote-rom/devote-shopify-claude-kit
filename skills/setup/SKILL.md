@@ -48,8 +48,16 @@ start ("Updating the Devote kit in this repo first.") and one line when done.
    run `npm run a11y -- --write-baseline` against the preview (`PREVIEW_URL=...`), commit the
    baseline, and tell the person the counts in one line: the theme's existing accessibility
    problems are now recorded and may only fall, and new ones fail the deploy.
-9. Run `npm run qa`. A failure in a guard the kit just added is a real defect in this
+9. `scripts/qa/no-hard-coded-text.mjs` treats the repo's first commit as the theme as first
+   pulled. Read `git log --reverse --format='%h %s' | head`. If the first commit is not the theme
+   as downloaded (an empty start, or a fresh theme added in a later commit) and
+   `scripts/qa/hard-coded-text-baseline.json` does not exist, run
+   `node scripts/qa/no-hard-coded-text.mjs --write-baseline --from <the commit that added the
+   downloaded theme>` and commit the baseline. Never from a commit after work on the theme began.
+10. Run `npm run qa`. A failure in a guard the kit just added is a real defect in this
    theme: say which guard and file, and leave it for the person to decide, unless they
-   asked you to fix things.
-10. Commit: `git add -A && git commit -m "Devote Shopify kit <version from .devote-kit-version>"`.
+   asked you to fix things. A `no-hard-coded-text` failure is text the build typed into Liquid
+   that a merchant cannot edit; it is fixed by moving it into settings (DEVOTE-KIT.md, "Nothing
+   Is Hard-Coded"), never by writing the baseline from today's commit.
+11. Commit: `git add -A && git commit -m "Devote Shopify kit <version from .devote-kit-version>"`.
    Do not push.

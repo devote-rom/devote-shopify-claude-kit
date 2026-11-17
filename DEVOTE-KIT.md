@@ -272,6 +272,61 @@ missing there, fill it in before building:
 
 ---
 
+## Nothing Is Hard-Coded
+
+Every word a shopper sees must be editable by someone with no coding knowledge and no access to
+the code: in Online Store > Customise, or under Edit default theme content. Nothing is typed into
+a section, snippet or block. One build went live on 17 Nov 2026 with about 110 strings written
+straight into its Liquid: the store's address, phone and opening hours, the dispatch cut-off line,
+shipping and returns lines, cart messages, and labels like "Filter" and "Remove". The client could
+change none of it without a developer. Marcel: "Nothing should ever be coded in."
+
+This covers headings, body copy, labels, button text, the store's address, phone, email and
+opening hours, delivery and dispatch promises, prices or thresholds written as text, links and
+images. Where each one goes:
+
+- **Section copy: a section or block setting.** Its `default` is the text you were about to type,
+  so the page reads the same on day one, and it is printed with `| escape` (`richtext` and
+  `inline_richtext` settings print as they are).
+- **Store-wide facts: one theme settings group.** Address, phone, email, opening hours, the
+  dispatch cut-off and the free shipping threshold go in one "Store Details" group in
+  `config/settings_schema.json` and are read everywhere as `settings.store_phone` and so on.
+  Never a copy per section: two copies disagree the first time someone changes one.
+- **Interface labels: locale keys.** "Filter", "Remove", "Sort by", "Close", every aria-label and
+  the like go in `locales/en.default.json` and print with `{{ 'products.facets.filter' | t }}`.
+  Use the theme's own key when it already has one. A number or name inside the label is a
+  variable: `"items_left": "{{ count }} left"`, printed with `| t: count: n`. Merchants edit these
+  under Online Store > Themes > Edit default theme content.
+- **A sentence with a value in it: one setting with a placeholder.** "Order by [time] for
+  same-day dispatch" is one setting, printed with
+  `{{ section.settings.dispatch_line | replace: '[time]', settings.dispatch_cutoff | escape }}`.
+  Never split the sentence around the value, which leaves half of it in code.
+- **Lists and per-product text: metafields or metaobjects**, connected in Customise as a dynamic
+  source. Store locations, for example, are a metaobject, not a list in a snippet.
+- **Images: an image picker setting** (see "Store content").
+- **JavaScript strings come from the page**: a `data-` attribute or a `window.theme.strings`
+  object filled with `| t` in Liquid. The guard does not read JS, so check scripts by hand.
+
+Allowed in code: punctuation, numbers, symbols and separators (`|`, `/`, `&nbsp;`, `&times;`),
+class names, and anything a person never reads. A deliberate exception (a name the client asked to
+lock) gets `{% # hard-coded-ok: <why> %}` on its line or the line above; the reason is required.
+
+`no-hard-coded-text.mjs` fails on a text node, an `alt`, `placeholder`, `title` or `aria-label`
+attribute, a string printed without `| t`, a worded `| default:` and a label passed to `render` or
+assigned as a literal, in `sections/`, `snippets/` and `blocks/`. It compares each file with the
+theme as it was first pulled (the repo's first commit), so text the theme already had passes and
+only what the build added fails. Files that page builders and apps write (PageFly, GemPages,
+Locksmith, the editor's generated blocks) are skipped, because their text is edited in that app.
+If the first commit is not the theme as downloaded (a fresh Horizon added in a later commit), record
+that commit once: `node scripts/qa/no-hard-coded-text.mjs --write-baseline --from <commit>`, and
+commit `scripts/qa/hard-coded-text-baseline.json`. Never write it from a commit after the build
+started: the build's own text would become baseline.
+
+Before handing over, change one string of each kind on the preview in Customise (a heading, the
+phone number, a label under Edit default theme content) and check the page shows the change.
+
+---
+
 ## Liquid fails silently
 
 `{{ prodcut.title }}` is not an error, it is a blank space. A filter on nil
@@ -922,7 +977,8 @@ Six questions, because getting one wrong means redoing the work:
 3. **Where does the data live.** Section setting, metafield, metaobject, line item
    property, or an app. The expensive one to reverse: once 400 products are
    filled in, changing a namespace or type is a migration. Write down what you
-   chose.
+   chose. Every word a shopper sees lives in one of these or a locale key, never
+   in the Liquid (see "Nothing Is Hard-Coded").
 4. **Theme edit or app block.** A theme edit dies the day the client changes
    theme. An app block survives.
 5. **Can Liquid do this.** Discounts, shipping and payment customisation are
