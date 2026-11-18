@@ -1,7 +1,8 @@
 // npm run release
 //
 // Puts approved work onto the live theme itself, so the live theme keeps its id (apps and
-// integrations are tied to it). Only after a person ran `npm run approve` for this exact code.
+// integrations are tied to it). Only after a full QA pass and a person's `npm run approve`, both
+// for this exact code (scripts/qa-pass.mjs, scripts/approval.mjs).
 // See scripts/approval.mjs for the whole flow.
 //
 // What it pushes, and what it never does:
@@ -17,6 +18,7 @@ import { dirname, join } from "node:path";
 import { APPROVAL, ROOT, approvalVerdict, deployTarget, inGitHistory, readApproval, reviewLink, unknownLiveChanges } from "./approval.mjs";
 import { execCli, sleepSync } from "./platform.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
+import { qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
 const target = deployTarget();
@@ -46,6 +48,9 @@ if (!verdict.ok) {
 }
 const review = reviewStatus();
 if (!review.ok) { console.log(`Not releasing: ${review.why}.`); process.exit(1); }
+// and every check passed on that same code: a deploy with --skip-walks or SKIP_QA, or failed walks, never releases
+const qa = qaPassVerdict(readQaPass(), { codeHash: codeHash(), store: STORE, theme: target.theme });
+if (!qa.ok) { console.log(`Not releasing: ${qa.why}.`); process.exit(1); }
 
 // 2. Which theme is live. Could not check means stop.
 let live;
