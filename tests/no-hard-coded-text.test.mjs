@@ -1,5 +1,5 @@
 // The hard-coded text guard's rules, and the proof: a section with typed-in copy fails, and the
-// same section with its copy in settings passes. Run with: node --test tests/
+// same section with its copy in settings passes. Run with: npm test
 //
 // If you change a rule in scripts/qa/no-hard-coded-text.mjs, change its case here in the same commit.
 import { test } from "node:test";
@@ -89,6 +89,7 @@ test("the guard fails a new section with typed-in copy, then passes once the cop
     const sh = (...a) => execFileSync("git", a, { cwd: repo, stdio: "ignore", env });
     for (const d of ["sections", "snippets", "blocks", "scripts/qa"]) mkdirSync(join(repo, d), { recursive: true });
     copyFileSync(GUARD, join(repo, "scripts", "qa", "no-hard-coded-text.mjs"));
+    copyFileSync(join(dirname(GUARD), "..", "platform.mjs"), join(repo, "scripts", "platform.mjs"));
     // The theme as first pulled already has some typed-in text. That is inherited, not this build's.
     writeFileSync(join(repo, "sections", "old-footer.liquid"), "<p>Copyright</p>\n");
     sh("init", "-q"); sh("add", "-A");

@@ -12,6 +12,13 @@ REPO="$(pwd)"
 
 say()  { printf '%s\n' "$1"; }
 warn() { printf '!! %s\n' "$1"; }
+# Appends lines to a file, on a new line even when the file does not end with one: on one repo the
+# .gitignore did not, and the kit's first entry joined the repo's last line.
+add_lines() {
+  f="$1"; shift
+  if [ -s "$f" ] && [ -n "$(tail -c 1 "$f")" ]; then printf '\n' >> "$f"; fi
+  printf '%s\n' "$@" >> "$f"
+}
 
 say "Installing the Devote Shopify kit into: $REPO"
 say ""
@@ -24,7 +31,9 @@ if [ "$KIT" = "$REPO" ]; then
 fi
 
 # Not "[ -d .git ]": in a git worktree .git is a file, and the installer refused worktrees (21 Oct 2026).
-if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1 || [ "$(git rev-parse --show-toplevel)" != "$(pwd -P)" ]; then
+# --show-cdup, not a path comparison: on Windows git prints D:/repo and Git Bash /d/repo for the same
+# folder, so comparing them refused every repo there (Nov 2026).
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1 || [ -n "$(git rev-parse --show-cdup)" ]; then
   warn "This folder is not the top of a git repository."
   warn "Open your Shopify repo and run this from there."
   exit 1
@@ -70,7 +79,7 @@ say "   DEVOTE-KIT.md, every script in scripts/ and scripts/qa/, the tests, desi
 say "2. Protecting the merchant's theme editor settings"
 touch .shopifyignore
 for line in "config/settings_data.json" "templates/*.json" "sections/*.json" "locales/*.json"; do
-  grep -qxF "$line" .shopifyignore || printf '%s\n' "$line" >> .shopifyignore
+  grep -qxF "$line" .shopifyignore || add_lines .shopifyignore "$line"
 done
 say "   .shopifyignore now covers config/settings_data.json, templates/*.json and sections/*.json (deploy with npm run deploy)"
 
@@ -117,7 +126,8 @@ if [ -f package.json ]; then
     if (!fs.existsSync("package.json.before-devote-kit")) fs.copyFileSync("package.json", "package.json.before-devote-kit");
     pkg.scripts = pkg.scripts || {};
     let added = [];
-    for (const [k, v] of Object.entries(add)) if (!pkg.scripts[k]) { pkg.scripts[k] = v; added.push(k); }
+    // npm init writes a "test" that only fails ("no test specified"); it counts as no script.
+    for (const [k, v] of Object.entries(add)) if (!pkg.scripts[k] || /no test specified/.test(pkg.scripts[k])) { pkg.scripts[k] = v; added.push(k); }
     fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
     console.log(added.length ? "   added scripts: " + added.join(", ") : "   your scripts were already there");
   ' "$KIT/package.json.example"
@@ -134,15 +144,15 @@ fi
 say "4b. Installing what the design walk needs (headless Chrome driver)"
 npm install --save-dev --no-audit --no-fund puppeteer-core@23 chrome-launcher@1 axe-core@4 pngjs@7 pixelmatch@7 >/dev/null 2>&1 \
   && say "   installed" || warn "   could not install; run: npm i -D puppeteer-core chrome-launcher axe-core pngjs pixelmatch"
-grep -q '^node_modules/' .gitignore 2>/dev/null || printf 'node_modules/\n/parity/\n.deploy.lock/\n' >> .gitignore
-grep -q 'visual-baseline' .gitignore 2>/dev/null || printf '/design/visual-baseline/\n' >> .gitignore
-grep -q '^.theme-incoming/' .gitignore 2>/dev/null || printf '.theme-incoming/\n' >> .gitignore
+grep -q '^node_modules/' .gitignore 2>/dev/null || add_lines .gitignore 'node_modules/' '/parity/' '.deploy.lock/'
+grep -q 'visual-baseline' .gitignore 2>/dev/null || add_lines .gitignore '/design/visual-baseline/'
+grep -q '^.theme-incoming/' .gitignore 2>/dev/null || add_lines .gitignore '.theme-incoming/'
 # An approval is one person's go for one release on this machine, used up by the release. Never shared through git.
-grep -q '^.release-approval.json' .gitignore 2>/dev/null || printf '.release-approval.json\n' >> .gitignore
+grep -q '^.release-approval.json' .gitignore 2>/dev/null || add_lines .gitignore '.release-approval.json'
 # A store that has not launched: the storefront password the walks use to open the myshopify.com preview.
-grep -q '^.storefront-password' .gitignore 2>/dev/null || printf '.storefront-password\n' >> .gitignore
-grep -q '^.theme-incoming/' .shopifyignore 2>/dev/null || printf '.theme-incoming/\n' >> .shopifyignore
-grep -q '^design/' .shopifyignore 2>/dev/null || printf 'node_modules/\nparity/\ndesign/\nscripts/\n' >> .shopifyignore
+grep -q '^.storefront-password' .gitignore 2>/dev/null || add_lines .gitignore '.storefront-password'
+grep -q '^.theme-incoming/' .shopifyignore 2>/dev/null || add_lines .shopifyignore '.theme-incoming/'
+grep -q '^design/' .shopifyignore 2>/dev/null || add_lines .shopifyignore 'node_modules/' 'parity/' 'design/' 'scripts/'
 
 # -------------------------------------------------------------------- plugin
 say "5. Installing the Shopify plugin for Claude"
@@ -162,6 +172,11 @@ mkdir -p "$HOOKS_DIR"
 cat > "$HOOKS_DIR/pre-push" <<'HOOK'
 #!/bin/sh
 # Claude Code's own gate only sees Claude. This covers what people type.
+# SKIP_QA=1 git push skips it, the same bypass the gate and deploy take; say so in the handover.
+if [ "$SKIP_QA" = "1" ]; then
+  echo "Pre-push checks SKIPPED (SKIP_QA=1): pushing unchecked."
+  exit 0
+fi
 if node -e 'process.exit(require("./package.json").scripts?.qa ? 0 : 1)' 2>/dev/null; then
   exec npm run qa
 fi
@@ -180,6 +195,11 @@ else
 fi
 
 node "$KIT/hooks/kit-version.mjs" > .devote-kit-version
+# An empty file reads as "no kit" to the session hook, which then asks for setup every session.
+if [ ! -s .devote-kit-version ]; then
+  warn "Could not work out the kit version (.devote-kit-version is empty). Send this output to Marcel."
+  exit 1
+fi
 
 say ""
 say "Done. Kit version $(cat .devote-kit-version)."

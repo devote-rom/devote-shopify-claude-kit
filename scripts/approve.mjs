@@ -9,6 +9,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL, ROOT, deployTarget, reviewLink } from "./approval.mjs";
+import { execCli } from "./platform.mjs";
 import { codeHash } from "./review-stamp.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
@@ -22,7 +23,7 @@ if (!target.store || !target.theme) { console.log("package.json's deploy script 
 // The preview must hold this repo's code, or the approval is for something nobody looked at.
 const pulled = mkdtempSync(join(tmpdir(), "approve-pull-"));
 try {
-  execFileSync("shopify", ["theme", "pull", "--store", target.store, "--theme", target.theme, "--path", pulled, ...CODE_GLOBS.flatMap((g) => ["--only", g])], { stdio: ["ignore", "pipe", "pipe"] });
+  execCli("shopify", ["theme", "pull", "--store", target.store, "--theme", target.theme, "--path", pulled, ...CODE_GLOBS.flatMap((g) => ["--only", g])], { stdio: ["ignore", "pipe", "pipe"] });
 } catch (e) {
   console.log(`Could not read the preview theme, so it is not known what you checked. Stopping. (${String(e.message).split("\n")[0]})`);
   process.exit(1);

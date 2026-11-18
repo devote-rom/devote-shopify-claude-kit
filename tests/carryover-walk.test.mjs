@@ -1,4 +1,4 @@
-// The carry-over walk's rules, without a store. Run with: node --test tests/
+// The carry-over walk's rules, without a store. Run with: npm test
 //
 // The first cases are what two rebuilds lost without anyone noticing (a delivery note shown only on
 // some products, an email-platform embed). If you change a rule in scripts/qa/carryover-walk.mjs,

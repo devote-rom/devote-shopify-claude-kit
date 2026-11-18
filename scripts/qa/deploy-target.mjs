@@ -7,7 +7,8 @@
 // Theme repos only: an app (no sections/ and layout/) does not deploy a theme.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMain } from "../platform.mjs";
 
 const FILLER = /fill-?in|example|acme|your-store|<|>/i;
 
@@ -31,7 +32,7 @@ export function isThemeRepo(root) {
   return existsSync(join(root, "sections")) && existsSync(join(root, "layout"));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+if (isMain(import.meta.url)) {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
   if (!isThemeRepo(root)) process.exit(0);
   const pkg = join(root, "package.json");

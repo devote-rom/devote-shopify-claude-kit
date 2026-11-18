@@ -48,8 +48,8 @@ start ("Updating the Devote kit in this repo first.") and one line when done.
    run `npm run a11y -- --write-baseline` against the preview (`PREVIEW_URL=...`), commit the
    baseline, and tell the person the counts in one line: the theme's existing accessibility
    problems are now recorded and may only fall, and new ones fail the deploy.
-9. `scripts/qa/no-hard-coded-text.mjs` treats the repo's first commit as the theme as first
-   pulled. Read `git log --reverse --format='%h %s' | head`. If the first commit is not the theme
+9. `scripts/qa/no-hard-coded-text.mjs` and every other guard in `npm run qa` treat the repo's
+   first commit as the theme as first pulled: a problem the theme had then passes. Read `git log --reverse --format='%h %s' | head`. If the first commit is not the theme
    as downloaded (an empty start, or a fresh theme added in a later commit) and
    `scripts/qa/hard-coded-text-baseline.json` does not exist, run
    `node scripts/qa/no-hard-coded-text.mjs --write-baseline --from <the commit that added the

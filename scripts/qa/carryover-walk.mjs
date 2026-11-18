@@ -29,12 +29,12 @@
 // Anything neither fixed nor handled fails, and so does anything that could not be checked: NOT
 // CHECKED is never a pass. Every run writes design/carryover-report.md (commit it), the list a
 // person reads to know what the old theme did. Runs in every full npm run deploy.
-import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
+import { execCli, isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const THEME_DIRS = ["layout", "sections", "snippets", "blocks", "templates", "config", "locales", "assets"];
@@ -411,7 +411,7 @@ async function main() {
   const preview = arg("--theme") || process.env.THEME_ID || t.theme;
   const domain = (arg("--domain") || process.env.SHOP_DOMAIN || t.domain || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
   if (!store || !preview || !domain) { console.log("NOT CHECKED: package.json's deploy script needs --store, --theme and --domain."); process.exit(1); }
-  const shopify = (args) => execFileSync("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+  const shopify = (args) => execCli("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
 
   // 1. The before theme: the live one unless --from names another.
   let before = arg("--from");
@@ -541,4 +541,4 @@ async function main() {
   if (missing.length || notChecked.length || !catalogueOk) process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
+if (isMain(import.meta.url)) main();

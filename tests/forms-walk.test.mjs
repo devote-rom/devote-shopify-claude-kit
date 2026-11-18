@@ -1,4 +1,4 @@
-// The forms walk's rules, without a store. Run with: node --test tests/
+// The forms walk's rules, without a store. Run with: npm test
 //
 // The first cases are the two forms one rebuild lost (28 Oct 2026). If you change a rule in
 // scripts/qa/forms-walk.mjs, change its case here in the same commit.

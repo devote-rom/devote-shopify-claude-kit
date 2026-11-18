@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
+import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Phones to large tablets as well as laptops: a hero photo sized for 390px left bands down both
@@ -235,4 +236,4 @@ async function main() {
   process.exit(fails || unchecked ? 1 : 0);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain(import.meta.url)) main();

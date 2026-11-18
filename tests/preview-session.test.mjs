@@ -1,5 +1,5 @@
 // Before launch the walks must test the myshopify.com preview, never the old site on the real domain.
-// Run with: node --test tests/
+// Run with: npm test
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { cookiesFrom, mergeCookies, onPasswordPage, servesShopify, unlock, walkTarget } from "../scripts/qa/preview-session.mjs";

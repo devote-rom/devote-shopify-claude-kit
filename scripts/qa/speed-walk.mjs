@@ -11,11 +11,11 @@
 // Prints the median of RUNS for each page and form factor. Exits 1 when the preview is slower
 // than live on score or LCP, so a worse result is the report, not a footnote. A run that
 // produces no result fails loudly; it is never counted as a pass.
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { onPasswordPage } from "./preview-session.mjs";
+import { execCli } from "../platform.mjs";
 
 const PREVIEW_RAW = process.env.PREVIEW_URL || process.argv[2];
 // Shopify's preview bar (about 370 KB, and it sometimes starts before the first paint) is never
@@ -64,7 +64,7 @@ async function lighthouse(url, desktop, i, cookie) {
     desktop ? "--preset=desktop" : "--form-factor=mobile",
     ...(chrome ? [`--port=${chrome.port}`, "--disable-storage-reset"] : ["--chrome-flags=--headless=new"])];
   try {
-    execFileSync("npx", args, { stdio: "ignore", timeout: 240000 });
+    execCli("npx", args, { stdio: "ignore", timeout: 240000 });
   } catch {
     throw new Error(`Lighthouse did not finish for ${url}`);
   } finally {

@@ -17,8 +17,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
+import { isMain } from "../platform.mjs";
 import { pageTypeOf, withPreview } from "./seo-walk.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -151,4 +152,4 @@ async function main() {
   process.exit(fails || notChecked.length ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
+if (isMain(import.meta.url)) main();

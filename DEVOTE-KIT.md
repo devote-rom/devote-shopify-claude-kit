@@ -54,8 +54,10 @@ sync; commit it):
   Merge it into yours (keep both changes), delete `.theme-incoming/`, deploy again. Deploy refuses
   while that folder has anything in it.
 - The first deploy from a repo to a theme has no record to compare with. If nobody else has
-  pushed to that theme, `npm run deploy -- --first-sync`. If someone may have,
-  `npm run deploy -- --pull` first and read the diff.
+  pushed to that theme (a fresh duplicate of live), `npm run deploy -- --first-sync`. If someone
+  may have, `npm run deploy -- --pull` first: it brings in files the repo lacks and puts the
+  theme's copy of every file that differs from yours in `.theme-incoming/`, never over your
+  file. Compare, keep what you want, delete `.theme-incoming/`, deploy again.
 
 Two people deploying in the same few seconds can still race. Say in the team chat before a
 deploy when someone else is on the same theme.
@@ -747,6 +749,11 @@ Each of these reached a client review once. They are here so they reach nobody e
   from a pull of the live theme, never from the working copy, or your own errors become baseline.
   `seo-basics.mjs` reads the layout when there is no `snippets/meta-tags` and keeps a baseline of
   what live already got wrong.
+- **Scripts run on Windows too.** The Shopify CLI, npm and npx are `.cmd` files there, which Node
+  will not start directly, and there is no `sleep` or `which`. Start them with `execCli`,
+  `sleepSync` and `haveCli` from `scripts/platform.mjs`, and test "run directly" with `isMain`;
+  `tests/platform.test.mjs` fails on anything else. On Windows, run install.sh from Git Bash and
+  the tests with `npm test`.
 
 - **Faster first paint exposes late CSS.** Removing render-blocking scripts lets the page paint
   before a section's own `<style>` (often at the end of the section) and before unsized images arrive,
@@ -869,7 +876,10 @@ branch merges into main.
    or the push names its files with `--only`. No bypass.
 3. **A merge with no evidence.** It reads the PR and checks the three rules below.
 4. **A push that is not green.** `npm run qa` first. Bypass `SKIP_QA=1`, and say
-   so if you use it.
+   so if you use it. The git pre-push hook takes the same bypass (`SKIP_QA=1 git push`);
+   never `--no-verify`. A guard problem the theme already had when it was first pulled
+   (the repo's first commit, or the `from` commit in `hard-coded-text-baseline.json`) passes;
+   only problems the build adds fail.
 5. **An approval.** `npm run approve`, `scripts/approve.mjs`, or writing
    `.release-approval.json`. No bypass: an approval means a person looked.
 

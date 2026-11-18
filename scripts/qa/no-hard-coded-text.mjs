@@ -26,9 +26,10 @@
 // later), record that commit instead, never the working copy:
 //   node scripts/qa/no-hard-coded-text.mjs --write-baseline --from <commit that added the theme>
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASE = join(ROOT, "scripts", "qa", "hard-coded-text-baseline.json");
@@ -261,5 +262,4 @@ function main() {
 
 // Compared through realpath: on a path that runs through a symlink (macOS's /var, a linked
 // folder) a plain comparison is false, main never runs, and the guard passes without checking.
-const invoked = (() => { try { return pathToFileURL(realpathSync(process.argv[1] ?? "")).href; } catch { return ""; } })();
-if (import.meta.url === invoked) main();
+if (isMain(import.meta.url)) main();

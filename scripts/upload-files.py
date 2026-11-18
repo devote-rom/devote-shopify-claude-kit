@@ -9,11 +9,24 @@ A file that fails is reported and never printed as uploaded.
 Output: one JSON line per file, {"local", "status", "ref"}, where ref is the value an
 image_picker (shopify://shop_images/<name>) or video (shopify://files/videos/<name>) setting takes.
 """
-import argparse, json, mimetypes, os, subprocess, sys, time
+import argparse, json, mimetypes, os, shutil, subprocess, sys, time
+
+
+def shopify_cmd():
+    """The Shopify CLI as a command list. On Windows it is shopify.cmd, which cannot take a
+    GraphQL query as an argument safely through cmd.exe, so its own run.js runs through node."""
+    if os.name != "nt":
+        return ["shopify"]
+    shim = shutil.which("shopify")
+    for base in filter(None, [shim and os.path.dirname(shim), os.environ.get("APPDATA") and os.path.join(os.environ["APPDATA"], "npm")]):
+        run_js = os.path.join(base, "node_modules", "@shopify", "cli", "bin", "run.js")
+        if os.path.exists(run_js):
+            return [shutil.which("node") or "node", run_js]
+    return [shim or "shopify"]
 
 
 def execute(store, query, variables=None, mutation=False):
-    cmd = ["shopify", "store", "execute", "--store", store, "--json", "--query", query]
+    cmd = shopify_cmd() + ["store", "execute", "--store", store, "--json", "--query", query]
     if variables is not None:
         cmd += ["--variables", json.dumps(variables)]
     if mutation:

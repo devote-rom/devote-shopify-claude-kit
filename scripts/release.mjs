@@ -11,18 +11,18 @@
 //   - never over a live file this repo has never seen: someone changed live outside the repo
 //     (the code editor, an app). Those are brought into .theme-incoming/ and nothing is pushed.
 //   - nothing is deleted on the live theme
-import { execFileSync } from "node:child_process";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { APPROVAL, ROOT, approvalVerdict, deployTarget, inGitHistory, readApproval, reviewLink, unknownLiveChanges } from "./approval.mjs";
+import { execCli, sleepSync } from "./platform.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
 const target = deployTarget();
 if (!target.store) { console.log("package.json's deploy script has no --store. Stopping."); process.exit(1); }
 const STORE = target.store;
-const run = (args, opts = {}) => execFileSync("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
+const run = (args, opts = {}) => execCli("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
 
 // One release or deploy at a time (the same lock deploy uses).
 const LOCK = join(ROOT, ".deploy.lock");
@@ -30,7 +30,7 @@ for (let waited = 0; ; waited += 2) {
   try { mkdirSync(LOCK); break; } catch {
     if (waited === 0) console.log("A deploy or release is running. Waiting for it to finish...");
     if (waited > 900) { console.log(`Still locked after 15 minutes. If nothing is running, remove ${LOCK}.`); process.exit(1); }
-    execFileSync("sleep", ["2"]);
+    sleepSync(2000);
   }
 }
 process.on("exit", () => { try { rmSync(LOCK, { recursive: true, force: true }); } catch {} });
