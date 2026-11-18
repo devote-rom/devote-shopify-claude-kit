@@ -17,7 +17,8 @@
     "widths": "node scripts/qa/widths-walk.mjs",
     "visual": "node scripts/qa/visual-walk.mjs",
     "live": "node scripts/qa/live-compare-walk.mjs",
-    "journeys": "node scripts/qa/journeys-walk.mjs"
+    "journeys": "node scripts/qa/journeys-walk.mjs",
+    "pages": "node scripts/qa/find-state-pages.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^23",

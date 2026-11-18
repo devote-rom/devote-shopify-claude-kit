@@ -246,6 +246,7 @@ npm run widths                        # buttons, chevrons, header, photo gaps, t
 npm run visual                        # every page at four widths against the last approved screenshots
 npm run live                          # the preview against the live site: text, sections and type styles at 390px and 1440px
 npm run journeys                      # menus, phone drawer, search, filters, variants, cart and checkout clicked through, live vs preview
+npm run pages                         # find sold-out, sale, many-variant and long-title products, an empty collection; writes design/state-pages.json
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
 npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
@@ -522,6 +523,19 @@ at another size resamples a little differently each load; icons, text and layout
 strictly, because three chevrons lifted 12px change only about 100 pixels. A walk that cries wolf
 gets ignored: if two runs on unchanged code disagree, fix the walk before trusting it. Prove it
 still catches a real change with `VISUAL_TRY_CSS='<css>' npm run visual`.
+
+## Every page type and state is checked
+
+`design/seo-pages.json` has one page of each type. Most layout bugs hide in states those pages do
+not show: a sold-out product, a product on sale, the product with the most variants, the longest
+product title, an empty collection, search with no results, the 404 page, the cart and the login
+page. `npm run pages` finds those from the live store (two public requests) and writes
+`design/state-pages.json`, each entry with why it is there. Deploy runs it when the file is missing
+or a month old. Commit it, and swap in a better example by hand when you know one.
+
+The visual, widths, accessibility and live comparison walks open every page in both files. The
+404 page is meant to return 404; every other page under 400. The speed walk measures the homepage,
+the first collection and the first product, mobile and desktop, each against the same page on live.
 
 ## Nothing on live goes missing on the preview
 

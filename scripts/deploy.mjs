@@ -27,6 +27,7 @@
 // Target: --store and --theme, or SHOPIFY_STORE and THEME_ID. Set them in package.json's deploy script.
 import { execFileSync, spawnSync } from "node:child_process";
 import { clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
+import { stateAgeDays } from "./qa/page-list.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -320,6 +321,16 @@ if (PRELAUNCH) {
   walkEnv.PRELAUNCH = "1";
   console.log(`\nThe walks run on the myshopify.com preview, because ${DOMAIN} is not on Shopify yet (it still serves the old site).`);
 }
+// The state pages (sold out, on sale, most variants, 404, cart...) the walks also open
+// (scripts/qa/page-list.mjs). Found from live when missing or a month old; could not look means the
+// walks run without them, and the QA pass says so.
+const notRun = PRELAUNCH ? ["live comparison", "journeys"] : [];
+const stateAge = stateAgeDays();
+if (!PRELAUNCH && (stateAge === null || stateAge > 30)) {
+  console.log("\nFinding sold-out, sale and other state pages on live (design/state-pages.json)");
+  const r = spawnSync(process.execPath, [join(ROOT, "scripts/qa/find-state-pages.mjs")], { cwd: ROOT, stdio: "inherit", env: { ...process.env, SHOP_DOMAIN: DOMAIN } });
+  if (r.status !== 0) notRun.push("sold-out, sale and other product state pages");
+}
 const failedWalks = [];
 let visualToLook = 0;
 for (const [label, script, env] of [
@@ -353,7 +364,7 @@ if (process.env.SKIP_QA === "1") {
 }
 let commit = null;
 try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
-writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun: PRELAUNCH ? ["live comparison", "journeys"] : [] });
+writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun });
 console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, visual${PRELAUNCH ? "" : ", live comparison, journeys"} and speed all passed.`);
-if (PRELAUNCH) console.log("Live comparison and journeys NOT CHECKED: the live address still serves the old site. Say so in the handover.");
+if (notRun.length) console.log(`NOT CHECKED: ${notRun.join(", ")}${PRELAUNCH ? " (the live address still serves the old site)" : ""}. Say so in the handover.`);
 if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one; npm run approve asks them to confirm it.`);

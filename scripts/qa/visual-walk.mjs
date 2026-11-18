@@ -10,7 +10,7 @@
 //   npm run visual -- --approve        a person only, after opening every marked picture (Claude never
 //                                      runs it: ship gate rule 6). npm run approve does the same for a release.
 //
-// Pages: design/seo-pages.json, or VISUAL_PAGES. Widths: 390, 768, 1024, 1440.
+// Pages: design/seo-pages.json plus design/state-pages.json (scripts/qa/page-list.mjs), or VISUAL_PAGES. Widths: 390, 768, 1024, 1440.
 // Approved screenshots live in design/visual-baseline/ (not committed: a machine with none says
 // NO BASELINE and fails until someone has looked at every page and approved). Current shots and
 // the marked pictures go to parity/visual/.
@@ -34,6 +34,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
 import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -75,9 +76,7 @@ function config() {
 // The pages a walk checks: a comma list in the env variable named, else design/seo-pages.json, else
 // the homepage. Exported for the other walks (the live compare walk uses LIVE_PAGES).
 export function pagesToCheck(envVar = "VISUAL_PAGES") {
-  if (process.env[envVar]) return process.env[envVar].split(",").map((s) => s.trim()).filter(Boolean);
-  const file = join(ROOT, "design", "seo-pages.json");
-  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).pages : ["/"];
+  return pageList(envVar);
 }
 
 function withPreview(path, base) {
@@ -190,7 +189,7 @@ async function main() {
       });
       await applyCookies(page, base.toString());
       const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-      if (res?.error || (res?.status && res.status() >= 400)) { unchecked++; return `NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`; }
+      if (res?.error || (res?.status && !statusOk(path, res.status()))) { unchecked++; return `NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`; }
       if (onPasswordPage(page.url())) { unchecked++; return `NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`; }
       // the pointer starts at the top-left corner, over the header; a transparent header hovered
       // turns solid, so park it off the page

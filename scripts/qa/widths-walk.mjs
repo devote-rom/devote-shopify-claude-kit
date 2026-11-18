@@ -20,7 +20,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
-import { isMain } from "../platform.mjs";
+import { isMain } from "../platform.mjs";import { pageList, statusOk } from "./page-list.mjs";
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Phones to large tablets as well as laptops: a hero photo sized for 390px left bands down both
@@ -29,9 +30,7 @@ export const WIDTHS = [320, 360, 390, 414, 480, 540, 600, 640, 700, 767, 768, 82
 const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
 
 function pagesToCheck() {
-  if ((process.env.WIDTH_PAGES || process.env.BUTTON_PAGES)) return (process.env.WIDTH_PAGES || process.env.BUTTON_PAGES).split(",").map((s) => s.trim()).filter(Boolean);
-  const file = join(ROOT, "design", "seo-pages.json");
-  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).pages : ["/"];
+  return pageList(process.env.WIDTH_PAGES ? "WIDTH_PAGES" : "BUTTON_PAGES");
 }
 
 // Runs in the page: labels of visible buttons whose text runs over more than one line or out of the box.
@@ -415,7 +414,7 @@ async function main() {
       for (const w of WIDTHS) {
         await page.setViewport({ width: w, height: 900, deviceScaleFactor: 1 });
         const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-        if (res?.error || (res && res.status && res.status() >= 400)) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
+        if (res?.error || (res && res.status && !statusOk(path, res.status()))) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
         if (onPasswordPage(page.url())) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); continue; }
         await page.evaluate(() => document.fonts.ready);
         for (const label of new Set(await page.evaluate(wrappedButtons, BUTTONS))) (found[`"${label}" wraps`] ||= []).push(w);

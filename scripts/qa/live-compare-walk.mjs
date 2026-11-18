@@ -12,7 +12,7 @@
 //
 //   PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' LIVE_URL='https://<domain>/' npm run live
 //
-// Pages: design/seo-pages.json, or LIVE_PAGES. Widths: 390 and 1440.
+// Pages: design/seo-pages.json plus design/state-pages.json (scripts/qa/page-list.mjs), or LIVE_PAGES. Widths: 390 and 1440.
 // Live is loaded twice. Anything that differs between those two loads (a rotating announcement, a
 // review count, a stock count, a timer) is dynamic: it is left out of the comparison and listed
 // in the report as dynamic, so a real difference is never hidden among them.
@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { imagesDone, pagesToCheck, settle } from "./visual-walk.mjs";
+import { statusOk } from "./page-list.mjs";
 import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -285,7 +286,7 @@ async function load(browser, url, { cookies, masks, tryCss, width }) {
     });
     if (cookies) await applyCookies(page, url);
     const res = await page.goto(url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-    if (res?.error || (res?.status && res.status() >= 400)) throw new Error(`${url} gave ${res.error || res.status()}`);
+    if (res?.error || (res?.status && !statusOk(new URL(url).pathname, res.status()))) throw new Error(`${url} gave ${res.error || res.status()}`);
     if (onPasswordPage(page.url())) throw new Error(`${url}: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`);
     await page.mouse.move(-10, -10).catch(() => {});
     await page.evaluate(settle, masks, tryCss || "");
