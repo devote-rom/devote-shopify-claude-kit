@@ -16,7 +16,8 @@
     "a11y": "node scripts/qa/a11y-walk.mjs",
     "widths": "node scripts/qa/widths-walk.mjs",
     "visual": "node scripts/qa/visual-walk.mjs",
-    "live": "node scripts/qa/live-compare-walk.mjs"
+    "live": "node scripts/qa/live-compare-walk.mjs",
+    "journeys": "node scripts/qa/journeys-walk.mjs"
   },
   "devDependencies": {
     "puppeteer-core": "^23",
