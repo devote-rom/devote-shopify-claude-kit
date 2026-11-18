@@ -242,8 +242,9 @@ npm run parity -- <name>              # only states whose name contains <name>, 
 npm run carryover                     # what the live theme does that the new build must keep, before building and in every deploy
 npm run seo                           # on-page SEO on the preview, one page per type, before every handover
 npm run a11y                          # WCAG 2.2 AA (axe-core) on the preview, phone and desktop, before every handover
-npm run widths                        # buttons, chevrons, header, photo gaps, sideways scroll at 24 widths, 320px to 2560px
+npm run widths                        # buttons, chevrons, header, photo gaps, text overlaps and cut-off text, sideways scroll at 24 widths, 320px to 2560px
 npm run visual                        # every page at four widths against the last approved screenshots
+npm run live                          # the preview against the live site: text, sections and type styles at 390px and 1440px
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
 npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
@@ -521,6 +522,48 @@ strictly, because three chevrons lifted 12px change only about 100 pixels. A wal
 gets ignored: if two runs on unchanged code disagree, fix the walk before trusting it. Prove it
 still catches a real change with `VISUAL_TRY_CSS='<css>' npm run visual`.
 
+## Nothing on live goes missing on the preview
+
+The visual walk compares a build with its own earlier screenshots, so the first build of a theme is
+never compared with anything. The most common QA finding over a year was "differs from live": text
+gone, a section gone, a heading or button font, size, weight or colour changed, prices styled
+differently. `npm run live` checks exactly that, with the live site as the reference:
+
+```bash
+PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' LIVE_URL='https://<domain>/' npm run live
+```
+
+For every page in `design/seo-pages.json` (or `LIVE_PAGES`), at 390px and 1440px, it reads both
+sites and fails on:
+
+- text on live that is not anywhere on the preview (text the preview adds is listed, not failed)
+- a section gone, or the sections in a different order (header and footer count)
+- a kind of text that looks different: h1 to h6, paragraphs, buttons, prices and header menu
+  links, each compared on font, size, weight, colour, letter spacing, capitals and line height,
+  taking the most common value so one odd element does not decide it
+
+Live is loaded twice. Anything that changed between those two loads (a timer, a stock count, a
+review count, a rotating line) is left out and listed in the report as dynamic. The full report is
+`parity/live-compare/report.md`, with every section on each side by name.
+
+A difference the brief asked for goes in `design/live-compare.json` with the reason, so it is
+listed as expected instead of failing:
+
+```json
+{
+  "expected": [{ "page": "/", "kind": "section", "match": "image_banner", "why": "the brief drops the old banner" }],
+  "ignore": [".review-widget"],
+  "skip": ["/search"]
+}
+```
+
+`kind` is `text`, `section` or `style`; `match` is a piece of the text, part of the section's
+name, or a style role (`h2`, or `h2 font-size`); `page` is a path, a path ending in `*`, or `*`.
+`ignore` hides a selector on both sites before reading, for something that changes but did not
+happen to change between the two live loads. Every entry needs a reason a person can check.
+Prove the walk still catches a change with `LIVE_COMPARE_TRY_CSS='h2{font-size:31px!important}'`:
+it adds the CSS to the preview only.
+
 ## Lessons from real builds
 
 Each of these reached a client review once. They are here so they reach nobody else.
@@ -534,6 +577,13 @@ Each of these reached a client review once. They are here so they reach nobody e
   768px to 1180px, and every check at 390px and 1440px passed. On another, a hero photo sized for a
   390px phone left bands down both sides from 540px to 767px (large phones, small tablets), a width
   range the walk did not visit until then.
+- **Text over text, text on a photo, text cut off.** QA kept finding these on builds that passed
+  every other check. The widths walk now fails text that runs over other text, text sitting on a
+  picture it was not laid over on purpose (a caption placed absolutely over a hero, or a banner
+  photo set behind its text, is fine), and text its own box cuts off. An ellipsis or a line clamp
+  is the theme shortening a long title on purpose, so it only fails on a button or header menu
+  link. Anything clipped or overlapping on purpose goes in `design/widths.json`:
+  `{ "cutOffOk": ["selector"], "overlapOk": ["selector"] }`, with the reason in the brand's notes.
 - **Look at every width yourself before a preview link goes to anyone.** The walk measures what it
   can name (a photo gap, a wrapped button, sideways scroll), not whether a layout looks right: on
   the same build a photo shrank into a corner under empty sky at tablet widths and passed every

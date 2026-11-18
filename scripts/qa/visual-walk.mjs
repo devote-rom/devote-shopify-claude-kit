@@ -72,8 +72,10 @@ function config() {
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
 }
 
-function pagesToCheck() {
-  if (process.env.VISUAL_PAGES) return process.env.VISUAL_PAGES.split(",").map((s) => s.trim()).filter(Boolean);
+// The pages a walk checks: a comma list in the env variable named, else design/seo-pages.json, else
+// the homepage. Exported for the other walks (the live compare walk uses LIVE_PAGES).
+export function pagesToCheck(envVar = "VISUAL_PAGES") {
+  if (process.env[envVar]) return process.env[envVar].split(",").map((s) => s.trim()).filter(Boolean);
   const file = join(ROOT, "design", "seo-pages.json");
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).pages : ["/"];
 }
@@ -88,7 +90,7 @@ function withPreview(path, base) {
 // Runs in the page: freeze everything that moves, load everything lazy, scroll the page's own
 // scroller to the end and back so scroll-triggered loading runs, then unroll it for one tall shot.
 // The scroll happens before the unroll so a sticky header sees the page return to the top.
-async function settle(masks, tryCss) {
+export async function settle(masks, tryCss) {
   const st = document.createElement("style");
   st.textContent = `*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; scroll-behavior: auto !important; content-visibility: visible !important; }
     ${masks.length ? `${masks.join(", ")} { visibility: hidden !important; }` : ""}
@@ -112,7 +114,7 @@ async function settle(masks, tryCss) {
 }
 
 // Runs in the page: every image loaded and decoded, or 10 seconds, whichever comes first.
-async function imagesDone() {
+export async function imagesDone() {
   document.querySelectorAll('img[loading="lazy"]').forEach((i) => { i.loading = "eager"; });
   await Promise.race([
     Promise.all([...document.images].map((i) => (i.complete ? (i.decode ? i.decode().catch(() => {}) : null) : new Promise((r) => { i.onload = i.onerror = r; })))),
