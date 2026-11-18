@@ -31,6 +31,12 @@ export function codeFiles() {
       if (statSync(p).isFile() && !(d === "sections" && f.endsWith(".json"))) out.push(p);
     }
   }
+  // liquid templates are code too (theme-sync.mjs CODE_TEMPLATE_DIRS), so they get reviewed
+  for (const d of ["templates", "templates/customers"]) {
+    const dir = join(ROOT, d);
+    if (!existsSync(dir)) continue;
+    for (const f of readdirSync(dir)) if (f.endsWith(".liquid") && statSync(join(dir, f)).isFile()) out.push(join(dir, f));
+  }
   for (const f of FILES) if (existsSync(join(ROOT, f))) out.push(join(ROOT, f));
   return out.sort();
 }

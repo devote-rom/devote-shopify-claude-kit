@@ -19,7 +19,11 @@ import { join, relative } from "node:path";
 
 export const CODE_DIRS = ["sections", "snippets", "blocks", "layout", "assets"];
 export const CODE_FILES = ["config/settings_schema.json"];
-export const CODE_GLOBS = [...CODE_DIRS.map((d) => `${d}/*`), ...CODE_FILES];
+// Liquid templates (alternate views like cart.<app>.json.liquid, page.<x>.liquid) are code, not editor
+// content: without this, release never pushed a new one, so a view an app fetches 404'd on live while
+// it worked on the preview.
+export const CODE_TEMPLATE_DIRS = ["templates", "templates/customers"];
+export const CODE_GLOBS = [...CODE_DIRS.map((d) => `${d}/*`), ...CODE_TEMPLATE_DIRS.map((d) => `${d}/*.liquid`), ...CODE_FILES];
 
 export const hashFile = (p) => createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 20);
 
@@ -33,6 +37,11 @@ export function codeFilesIn(dir) {
       const p = join(full, f);
       if (statSync(p).isFile() && !(d === "sections" && f.endsWith(".json"))) out.push(relative(dir, p));
     }
+  }
+  for (const d of CODE_TEMPLATE_DIRS) {
+    const full = join(dir, d);
+    if (!existsSync(full)) continue;
+    for (const f of readdirSync(full)) if (f.endsWith(".liquid") && statSync(join(full, f)).isFile()) out.push(relative(dir, join(full, f)));
   }
   for (const f of CODE_FILES) if (existsSync(join(dir, f))) out.push(f);
   return out.sort();
