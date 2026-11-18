@@ -1,5 +1,5 @@
 // The deploy script must name the store, the preview theme and the real domain.
-// Run with: node --test tests/
+// Run with: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { missingDeployTarget } from "../scripts/qa/deploy-target.mjs";

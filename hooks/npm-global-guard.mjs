@@ -5,7 +5,7 @@
 // told the person to send the error to Marcel. This sends Claude to the script instead.
 // Silent when the global folder is writable, so it never blocks an install that would work.
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { execCli, isMain } from "../scripts/platform.mjs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -34,12 +34,12 @@ export function advice(command, writable) {
     "and prints the shopify path on its last line. Do not ask the person to fix permissions.";
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   let command = "";
   try { command = JSON.parse(readFileSync(0, "utf8")).tool_input?.command || ""; } catch {}
   if (!isGlobalInstall(command)) process.exit(0);
   let writable = true;
-  try { writable = globalFolderWritable(execFileSync("npm", ["prefix", "-g"], { encoding: "utf8" }).trim()); } catch {}
+  try { writable = globalFolderWritable(execCli("npm", ["prefix", "-g"], { encoding: "utf8" }).trim()); } catch {}
   const msg = advice(command, writable);
   if (msg) {
     process.stderr.write(msg.replaceAll("${CLAUDE_PLUGIN_ROOT}", process.env.CLAUDE_PLUGIN_ROOT || join(dirname(fileURLToPath(import.meta.url)), "..")) + "\n");

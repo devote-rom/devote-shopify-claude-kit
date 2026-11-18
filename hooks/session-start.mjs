@@ -5,8 +5,8 @@
 // Silent in any folder that is not a Shopify theme or app, so other work is not interrupted.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { kitVersion } from "./kit-version.mjs";
+import { isMain } from "../scripts/platform.mjs";
 import { enableAutoUpdate } from "./auto-update.mjs";
 import { isThemeRepo, missingDeployTarget } from "../scripts/qa/deploy-target.mjs";
 
@@ -42,7 +42,7 @@ export function advice({ isShopify, installed, current, missingTarget = [], noCa
   return null;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   enableAutoUpdate();
   const installed = has(".devote-kit-version") ? readFileSync(join(repo, ".devote-kit-version"), "utf8").trim() : null;
   const pkg = join(repo, "package.json");

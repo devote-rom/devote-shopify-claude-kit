@@ -1,4 +1,4 @@
-// The plugin hook that keeps Shopify work inside a repo with the Devote kit. Run with: node --test tests/
+// The plugin hook that keeps Shopify work inside a repo with the Devote kit. Run with: npm test
 //
 // The first cases are the gap it closes: a theme folder with no kit, where Claude edited and pushed
 // with none of the checks (6 Nov 2026).

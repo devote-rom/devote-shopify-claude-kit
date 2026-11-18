@@ -1,4 +1,4 @@
-// The SEO walk's rules, without a store. Run with: node --test tests/
+// The SEO walk's rules, without a store. Run with: npm test
 //
 // Each case is a page shape that either shipped (30 Sep 2026) or would be a false alarm.
 // If you change a rule in scripts/qa/seo-walk.mjs, change its case here in the same commit.

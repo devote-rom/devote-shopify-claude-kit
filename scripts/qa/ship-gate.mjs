@@ -38,9 +38,10 @@
 // in their own terminal goes through .git/hooks/pre-push instead.
 import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { checkStore, storesInCommand } from "../dev-store.mjs";
+import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -309,7 +310,7 @@ const deny = (reason) => {
 
 // Only run the hook when executed as one. The rules above are importable so they
 // can be tested without feeding this process a payload on stdin.
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
+if (isMain(import.meta.url)) main();
 
 function main() {
   let payload = "";

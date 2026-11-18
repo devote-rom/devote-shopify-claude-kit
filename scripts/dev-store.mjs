@@ -10,7 +10,7 @@
 // "dev" is a development store in the Partner organisation. "client-transfer" is one being
 // built for a client and not yet handed over. Anything else (a client's own store, a store
 // we only collaborate on, where Shopify returns no type at all) is a real shopfront.
-import { execFileSync } from "node:child_process";
+import { execCli } from "./platform.mjs";
 
 export const DEV_TYPES = new Set(["dev", "client-transfer"]);
 
@@ -38,7 +38,7 @@ export function normaliseStore(store) {
  *   error is set when the question could not be answered. That is not an answer of "no":
  *   callers must refuse and say the check failed, not that the store is a real one.
  */
-export function checkStore(store, { exec = execFileSync } = {}) {
+export function checkStore(store, { exec = execCli } = {}) {
   if (!store) return { dev: false, type: null, error: "no store named, so there is nothing to check" };
   let out;
   try {

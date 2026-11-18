@@ -19,10 +19,10 @@
 // Reading, pulling and theme dev stay allowed. The fix is always the same and takes a minute:
 // /devote-shopify:setup in that folder, or /devote-shopify:new-brand for a store with no folder yet.
 // Fails open on anything it cannot read: the brand repo's ship gate is the hard stop for publishing.
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { executablePart } from "../scripts/qa/ship-gate.mjs";
+import { isMain } from "../scripts/platform.mjs";
 
 const THEME_DIRS = new Set(["sections", "snippets", "blocks", "layout", "assets", "templates", "config", "locales"]);
 const fsExists = (p) => existsSync(p);
@@ -99,7 +99,7 @@ const deny = (reason) => {
   process.exit(0);
 };
 
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
+if (isMain(import.meta.url)) {
   let payload = {};
   try { payload = JSON.parse(readFileSync(0, "utf8")); } catch { process.exit(0); }
   const input = payload.tool_input || {};

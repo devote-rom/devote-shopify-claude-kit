@@ -20,8 +20,9 @@
 // WAI decorative-images tutorial, and axe-core's heading rules. See "SEO checks" in CLAUDE.md.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { applyCookies, cookieHeader, mergeCookies, onPasswordPage } from "./preview-session.mjs";
+import { isMain } from "../platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -537,4 +538,4 @@ async function main() {
   process.exit(fails || notChecked.length ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
+if (isMain(import.meta.url)) main();

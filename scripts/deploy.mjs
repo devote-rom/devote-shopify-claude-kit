@@ -8,6 +8,8 @@
 //   npm run deploy -- --skip-walks   # while iterating: no SEO or speed, and it says so (not for handover)
 //   npm run deploy -- --with-json    # also push your template/settings changes, only if safe
 //   npm run deploy -- --pull         # just bring editor changes and other people's code into the repo
+//                                    # (never over a file of yours: with no record of the last sync,
+//                                    # the theme's copy of a file you also have goes in .theme-incoming/)
 //   npm run deploy -- --first-sync   # first deploy from this repo to a theme, when nobody else has pushed to it
 //   npm run deploy -- --with-json --json templates/product.json,templates/collection.json
 //                                    # push only these editor files of yours (parallel page builds)
@@ -29,6 +31,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reviewLink } from "./approval.mjs";
+import { execCli, sleepSync } from "./platform.mjs";
 import { checkStore } from "./dev-store.mjs";
 import { servesShopify, unlock as unlockStorefront, walkTarget } from "./qa/preview-session.mjs";
 import { reviewStatus } from "./review-stamp.mjs";
@@ -59,7 +62,7 @@ for (let waited = 0; ; waited += 2) {
   try { mkdirSync(LOCK); break; } catch {
     if (waited === 0) console.log("Another deploy is running. Waiting for it to finish...");
     if (waited > 900) { console.log(`Still locked after 15 minutes. If no deploy is running, remove ${LOCK}.`); process.exit(1); }
-    execFileSync("sleep", ["2"]);
+    sleepSync(2000);
   }
 }
 const unlock = () => { try { rmSync(LOCK, { recursive: true, force: true }); } catch {} };
@@ -68,7 +71,7 @@ for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => process.exit(130)
 // locales too: the theme editor's "Edit default theme content" writes locales/*.json
 const EDITOR_GLOBS = ["templates/*.json", "templates/customers/*.json", "config/settings_data.json", "sections/*.json", "locales/*.json"];
 
-const run = (args, opts = {}) => execFileSync("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
+const run = (args, opts = {}) => execCli("shopify", args, { stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", ...opts });
 // A push "with errors" still exits 0 and prints success, while Shopify has silently kept the old
 // copy of every rejected file (1 Oct 2026: an invalid header schema never uploaded and the
 // deploy said "Code pushed"). Push with --json and stop on any rejected file.
@@ -125,8 +128,8 @@ if (!DOMAIN && !SKIP_WALKS && !PULL_ONLY) {
 // 0. Code someone else pushed (scripts/theme-sync.mjs). Checked before anything else, so a deploy
 // never puts back an old copy of a file another person changed on the theme.
 if (existsSync(INCOMING) && readdirSync(INCOMING, { recursive: true }).length) {
-  console.log("Not deploying: .theme-incoming/ still holds other people's versions of files you also changed.");
-  console.log("Merge each one into the matching file in the repo, delete .theme-incoming/, then deploy again.");
+  console.log("Not deploying: .theme-incoming/ still holds the theme's versions of files that differ from yours.");
+  console.log("Merge what you want to keep into the matching file in the repo, delete .theme-incoming/, then deploy again.");
   process.exit(1);
 }
 const codeRemoteDir = mkdtempSync(join(tmpdir(), "code-pull-"));
@@ -136,25 +139,39 @@ if (!Object.keys(remoteCode).length) { console.log("Pulled no code from the them
 const localCode = Object.fromEntries(codeFilesIn(ROOT).map((f) => [f, hashFile(join(ROOT, f))]));
 const allCodeBase = existsSync(CODE_BASELINE) ? JSON.parse(readFileSync(CODE_BASELINE, "utf8")) : {};
 const saveCodeBase = (b) => { allCodeBase[THEME] = b; writeFileSync(CODE_BASELINE, JSON.stringify(allCodeBase, null, 2) + "\n"); };
+const HAD_CODE_BASE = Boolean(allCodeBase[THEME]);
 const sync = classify(allCodeBase[THEME] || null, remoteCode, localCode);
-if (PULL_ONLY) { sync.take.push(...sync.unknown); sync.unknown = []; }
+// With no record of the last sync, a file that differs cannot be called theirs or yours. --pull used
+// to take the theme's copy of every one, which replaced a developer's uncommitted work on a fresh
+// duplicate of live that nobody else had touched (Nov 2026). Now a file the repo lacks comes in, and
+// the theme's copy of a file the repo has goes to .theme-incoming/, leaving yours as it is.
+if (PULL_ONLY) {
+  for (const f of sync.unknown) (f in localCode ? sync.clash : sync.take).push(f);
+  sync.unknown = [];
+}
 if (sync.unknown.length && !FIRST_SYNC) {
   console.log(`Not deploying: this is the first deploy from this repo to theme ${THEME}, and ${sync.unknown.length} code file(s) differ from what the theme holds:`);
   for (const f of sync.unknown.slice(0, 25)) console.log(`  ${f}`);
   if (sync.unknown.length > 25) console.log(`  and ${sync.unknown.length - 25} more`);
   console.log("With no record of the last sync it cannot tell your changes from someone else's.");
-  console.log("If nobody else has pushed to this theme, these are yours: npm run deploy -- --first-sync");
-  console.log("If someone else may have, bring the theme's copies in first: npm run deploy -- --pull, then review git diff.");
+  console.log("If nobody else has pushed to this theme (a fresh duplicate of live), these are yours: npm run deploy -- --first-sync");
+  console.log("If someone else may have: npm run deploy -- --pull. It leaves your files as they are and puts the theme's copies in .theme-incoming/ to compare.");
   process.exit(1);
 }
 if (sync.take.length || sync.clash.length) {
   for (const f of sync.take) { mkdirSync(dirname(join(ROOT, f)), { recursive: true }); cpSync(join(codeRemoteDir, f), join(ROOT, f)); }
   for (const f of sync.clash) { mkdirSync(dirname(join(INCOMING, f)), { recursive: true }); cpSync(join(codeRemoteDir, f), join(INCOMING, f)); }
-  const base = { ...(allCodeBase[THEME] || {}) };
+  // No earlier record: the theme as it is now becomes the last sync, so once .theme-incoming/ is
+  // merged and deleted, your differing files count as your changes and deploy pushes them.
+  const base = HAD_CODE_BASE ? { ...allCodeBase[THEME] } : { ...remoteCode };
   for (const f of [...sync.take, ...sync.clash]) base[f] = remoteCode[f];
   saveCodeBase(base);
-  if (sync.take.length) console.log(`Someone else changed these on the theme since your last sync. Brought into the repo:\n  ${sync.take.join("\n  ")}`);
-  if (sync.clash.length) console.log(`You and someone else both changed these. Their versions are in .theme-incoming/ to merge:\n  ${sync.clash.join("\n  ")}`);
+  if (sync.take.length) console.log(HAD_CODE_BASE
+    ? `Someone else changed these on the theme since your last sync. Brought into the repo:\n  ${sync.take.join("\n  ")}`
+    : `On the theme but not in the repo. Brought into the repo:\n  ${sync.take.join("\n  ")}`);
+  if (sync.clash.length) console.log(HAD_CODE_BASE
+    ? `You and someone else both changed these. Their versions are in .theme-incoming/ to merge:\n  ${sync.clash.join("\n  ")}`
+    : `These differ from the theme, and with no record of the last sync it cannot tell whose change it is. Your files were left as they are; the theme's copies are in .theme-incoming/ to compare:\n  ${sync.clash.join("\n  ")}`);
   if (!PULL_ONLY || sync.clash.length) {
     console.log("\nNothing was pushed. Review with git diff" + (sync.clash.length ? ", merge .theme-incoming/ and delete it" : "") + ", commit, then deploy again.");
     process.exit(1);
@@ -171,9 +188,14 @@ if (!remoteFiles.length) { console.log("Pulled nothing from the theme, so nothin
 const remoteHashes = Object.fromEntries(remoteFiles.map((f) => [f, hash(join(remote, f))]));
 const baseline = existsSync(BASELINE) ? JSON.parse(readFileSync(BASELINE, "utf8"))[THEME] || null : null;
 
+// With a baseline, a file the theme changed since then was edited in the editor. Without one, only a
+// file the repo lacks is safe to bring in; the theme's copy of a file the repo has goes to
+// .theme-incoming/, so a first deploy or --pull never writes over your template work (the same
+// overwrite as the code files above).
 const editedInEditor = baseline
   ? remoteFiles.filter((f) => remoteHashes[f] !== baseline[f])
-  : remoteFiles.filter((f) => !existsSync(join(ROOT, f)) || hash(join(ROOT, f)) !== remoteHashes[f]);
+  : remoteFiles.filter((f) => !existsSync(join(ROOT, f)));
+const editorUnknown = baseline ? [] : remoteFiles.filter((f) => existsSync(join(ROOT, f)) && hash(join(ROOT, f)) !== remoteHashes[f]);
 
 function adoptRemote(files) {
   for (const f of files) { mkdirSync(dirname(join(ROOT, f)), { recursive: true }); cpSync(join(remote, f), join(ROOT, f)); }
@@ -182,6 +204,14 @@ function adoptRemote(files) {
   writeFileSync(BASELINE, JSON.stringify(all, null, 2) + "\n");
 }
 
+if (editorUnknown.length) {
+  for (const f of editorUnknown) { mkdirSync(dirname(join(INCOMING, f)), { recursive: true }); cpSync(join(remote, f), join(INCOMING, f)); }
+  adoptRemote(editedInEditor);
+  if (editedInEditor.length) console.log(`On the theme but not in the repo. Brought into the repo:\n  ${editedInEditor.join("\n  ")}`);
+  console.log(`These template and settings files differ from the theme, and with no record of the last sync it cannot tell whose change it is. Your files were left as they are; the theme's copies are in .theme-incoming/ to compare:\n  ${editorUnknown.join("\n  ")}`);
+  console.log("\nNothing was pushed. Keep what you want from .theme-incoming/, delete it, commit, then deploy again (add --with-json to push your template changes).");
+  process.exit(1);
+}
 if (PULL_ONLY || editedInEditor.length) {
   adoptRemote(editedInEditor.length ? editedInEditor : []);
   if (editedInEditor.length) {

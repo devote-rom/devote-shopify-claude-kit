@@ -1,5 +1,5 @@
 // The development-store exception to "never push to the live theme".
-// Run with: node --test tests/
+// Run with: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { checkStore, isDevType, normaliseStore, storesInCommand } from "../scripts/dev-store.mjs";

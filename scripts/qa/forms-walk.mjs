@@ -20,8 +20,8 @@
 // destination declares it with data-replaces-form="<signature>" (for example
 // data-replaces-form="klaviyo:AbC123"), and only after it was checked to land in the same list
 // or inbox. See "Forms keep their destination" in DEVOTE-KIT.md.
-import { pathToFileURL } from "node:url";
 import { cookieHeader, mergeCookies } from "./preview-session.mjs";
+import { isMain } from "../platform.mjs";
 
 // ------------------------------------------------------------------------------ pure functions
 
@@ -158,4 +158,4 @@ async function main() {
   if (issues.length || notChecked.length) process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) main();
+if (isMain(import.meta.url)) main();

@@ -1,4 +1,4 @@
-// The gate's own tests. Run with: node --test tests/
+// The gate's own tests. Run with: npm test
 //
 // Every rule in ship-gate.mjs is a pure function for this reason: the awkward
 // combinations are answerable here rather than by publishing a real theme to find
