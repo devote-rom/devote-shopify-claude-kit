@@ -244,6 +244,7 @@ npm run seo                           # on-page SEO on the preview, one page per
 npm run a11y                          # WCAG 2.2 AA (axe-core) on the preview, phone and desktop, before every handover
 npm run widths                        # buttons, chevrons, header, photo gaps, sideways scroll at 24 widths, 320px to 2560px
 npm run visual                        # every page at four widths against the last approved screenshots
+npm run journeys                      # menus, phone drawer, search, filters, variants, cart and checkout clicked through, live vs preview
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
 npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
@@ -520,6 +521,41 @@ at another size resamples a little differently each load; icons, text and layout
 strictly, because three chevrons lifted 12px change only about 100 pixels. A walk that cries wolf
 gets ignored: if two runs on unchanged code disagree, fix the walk before trusting it. Prove it
 still catches a real change with `VISUAL_TRY_CSS='<css>' npm run visual`.
+
+## Every journey a shopper takes still works
+
+Every other walk only loads pages, and a page can look right while nothing on it works. A QA
+tester's findings over one year held about 580 in things you have to use: the menus and the phone
+drawer, search, filters, sort and page 2, variant pickers and their prices, add to cart and the
+slide cart, checkout, forms and back in stock. `npm run journeys` clicks and types through them on
+the live site and on the preview, at 1440px and on a 390px phone, and compares the two:
+
+```bash
+LIVE_URL='https://<domain>/' PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run journeys
+```
+
+1. A step that works on live and fails on the preview is a FAIL. So is a JS error or a 4xx or 5xx
+   from the store's own domain on the preview that never happened on live. A picture of the
+   preview at each failed step goes to `parity/journeys/`: open it before you fix anything.
+2. A step that fails on live too is listed and does not fail the build, but the store has the
+   problem: tell the person.
+3. NOT FOUND means the walk could not find the menu button, add to cart button or whatever it
+   names on this theme. It is never a pass. Give it the theme's selector in
+   `design/journeys.json` under `"selectors"`, or leave that journey out under `"skip"` with the
+   reason (the walk's header lists the roles). Copy `journeys.json.example` from the kit to start.
+4. Journeys of the brand's own (a size guide, a store finder, a quiz) go in the same file, in the
+   steps the walk's header lists.
+5. It never types into checkout or goes past its first step, so no order is placed, and it clears
+   every cart it makes. It blocks form sends and analytics and ad pixel beacons, so the client
+   gets no test emails and no fake add to carts in their reports. Only a journey with
+   `"submit": true` sends a form, on the live site and the preview at both widths: point it at a
+   test inbox or test list, never the client's real one.
+6. Prove it still catches a break with `JOURNEYS_TRY_JS='<script>' npm run journeys`, which runs
+   the script on the preview only (stop the add to cart click, hide the submenus), then take it
+   away.
+
+If the store answers 429 (too many requests), the walk waits and tries again, then says NOT
+CHECKED. Run it again a few minutes later; never read that as a pass.
 
 ## Lessons from real builds
 

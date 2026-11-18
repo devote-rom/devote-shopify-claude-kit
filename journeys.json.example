@@ -1,0 +1,22 @@
+{
+  "$comment": "Copy to design/journeys.json only if the built-in journeys need help on this theme. See the header of scripts/qa/journeys-walk.mjs for every step and selector role.",
+  "skip": {
+    "drawer": "FILL-IN the reason a person can check, e.g. the nav shows in full on phones, there is no menu button"
+  },
+  "selectors": {
+    "addToCart": "FILL-IN css of the add to cart button, only if the walk said NOT FOUND"
+  },
+  "journeys": [
+    {
+      "name": "Size guide opens",
+      "at": "both",
+      "steps": [
+        { "goto": "/products/FILL-IN" },
+        { "click": "FILL-IN css of the size guide link" },
+        { "expectVisible": "FILL-IN css of the size guide popup" },
+        { "press": "Escape" },
+        { "expectHidden": "FILL-IN css of the size guide popup" }
+      ]
+    }
+  ]
+}
