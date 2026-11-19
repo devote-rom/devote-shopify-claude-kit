@@ -71,7 +71,9 @@ import {
 import { pageList } from "./page-list.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { isMain } from "../platform.mjs";
-import { pacedGoto, pacedFetch } from "./pace.mjs";
+import { THROTTLED_MESSAGE, noteThrottle, pace, pacedGoto, pacedFetch } from "./pace.mjs";
+
+const PRODUCT_JS = new Map();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const OUT = join(ROOT, "parity", "journeys");
@@ -406,7 +408,12 @@ function installHelpers() {
       return null;
     },
     links: (root = document, mode = "seen") => { if (mode === "seen") window.__dj.closePopups(); return [...root.querySelectorAll("a[href]")].filter(ok(mode)); },
-    snap() { window.__dj.before = new Set(window.__dj.links()); },
+    snap() {
+      window.__dj.before = new Set(window.__dj.links());
+      window.__dj.beforeCtl = new Set(window.__dj.controls());
+    },
+    // controls that open a submenu (a drawer's item buttons are often buttons, not links)
+    controls() { return [...document.querySelectorAll('summary, button[aria-controls], button[aria-expanded], [aria-haspopup="true"]')].filter(window.__dj.seen); },
     fresh() {
       const b = window.__dj.before || new Set();
       return window.__dj.links().filter((a) => !b.has(a) && !/^(javascript:|#|mailto:|tel:)/.test(a.getAttribute("href") || ""));
@@ -530,9 +537,12 @@ async function openDrawer(ctx) {
   await sleep(500); // let a sliding drawer finish
   const drawer = await page.evaluateHandle(() => {
     const f = window.__dj.fresh();
-    // the drawer: the smallest element holding every link that came on screen
+    // the drawer: the smallest element holding every link and submenu control that came on screen
+    // (one drawer had its seven submenu items as buttons and only its plain links as links)
+    const ctl = window.__dj.controls().filter((e) => !window.__dj.beforeCtl?.has(e));
+    const all = [...f, ...ctl];
     let box = f[0]?.parentElement;
-    while (box && !f.every((a) => box.contains(a))) box = box.parentElement;
+    while (box && !all.every((a) => box.contains(a))) box = box.parentElement;
     window.__dj.drawerLinks = f;
     return box;
   });
@@ -615,10 +625,14 @@ async function menuJourney(ctx) {
       const control = await item.getProperty("control").then((h) => h.asElement());
       if (!trigger || !(await trigger.evaluate((e) => window.__dj.seen(e)))) return { status: "fail", detail: "the menu item is not on screen" };
       await page.evaluate(() => window.__dj.snap());
+      const startPath = new URL(page.url()).pathname;
+      const wentTo = () => { const now = new URL(page.url()).pathname; return now !== startPath ? now : null; };
       let how = phone ? "tapped" : "hovered";
       if (phone) await ctx.click(control || trigger); else await trigger.hover();
       let fresh = await ctx.waitFor(() => page.evaluate(() => window.__dj.fresh().length || null), 1500);
-      if (!fresh && !phone && control) { await ctx.click(control); how = "clicked"; fresh = await ctx.waitFor(() => page.evaluate(() => window.__dj.fresh().length || null), 1500); }
+      if (!fresh && !phone && control && !wentTo()) { await ctx.click(control); how = "clicked"; fresh = await ctx.waitFor(() => page.evaluate(() => window.__dj.fresh().length || null), 1500); }
+      // a click that leaves the page is not a submenu opening, whatever links the next page has
+      if (wentTo()) return { status: "fail", detail: `${how}, and it went to ${wentTo()} instead of opening a submenu` };
       if (!fresh) return { status: "fail", detail: `${how}, and no submenu links came on screen` };
       const href = await page.evaluate(() => window.__dj.fresh()[0].href);
       const status = await ctx.loads(href);
@@ -634,6 +648,11 @@ async function menuJourney(ctx) {
       const again = await openDrawer(ctx);
       if (again.result.status !== "pass") return;
       await page.evaluate((d) => { window.__dj.drawerRoot = d; }, again.drawer);
+      const relabel = await listItems();
+      if (!relabel || relabel[i + 1] !== labels[i + 1]) return;
+    } else if (new URL(page.url()).pathname !== "/") {
+      // the last item left the page: start again from the homepage and find the next one
+      await ctx.goto("/");
       const relabel = await listItems();
       if (!relabel || relabel[i + 1] !== labels[i + 1]) return;
     } else {
@@ -845,7 +864,23 @@ async function productJourney(ctx) {
   if (!(await ctx.step(`changing the variant of ${p.handle} updates the address and the price`, async () => {
     const r = await chooseVariant(ctx, pick.from, pick.to, names);
     if (!r.ok) return r.disabled ? { status: "fail", detail: r.detail } : notFound(`${r.detail} on /products/${p.handle}`, null);
-    js = await page.evaluate((h) => fetch(`/products/${h}.js`).then((x) => x.json()), p.handle);
+    // the product's own data; a 429 or bot check page here is the store limiting this computer, not a fault
+    // read once per store and product, then reused: product data is the same at every width and on
+    // every theme, and Shopify limits repeated /products/<handle>.js reads quickly
+    const key = `${new URL(page.url()).host}/products/${p.handle}.js`;
+    let got = PRODUCT_JS.get(key);
+    if (!got) {
+      await pace(`https://${key}`);
+      got = await page.evaluate((h) => fetch(`/products/${h}.js`).then(async (x) => ({ status: x.status, text: await x.text() })), p.handle);
+      if (got.status === 200) PRODUCT_JS.set(key, got);
+    }
+    try { js = JSON.parse(got.text); } catch {
+      if (got.status === 429 || /just a moment/i.test(got.text.slice(0, 2000))) {
+        noteThrottle(`/products/${p.handle}.js`, got.status === 429 ? "429" : "bot check");
+        throw Object.assign(new Error(THROTTLED_MESSAGE), { notChecked: true });
+      }
+      throw Object.assign(new Error(`/products/${p.handle}.js returned ${got.status}, not product data`), { notChecked: true });
+    }
     const want = js.variants.find((v) => v.id === pick.to.id);
     const okUrl = await ctx.waitFor(() => page.evaluate((id) => new URLSearchParams(location.search).get("variant") === String(id) || null, pick.to.id), 5000);
     const priceText = async () => { const h = await ctx.find("price", { root: await page.evaluateHandle(() => window.__dj.main()), mode: "laid", text: null }); return h ? h.evaluate((e) => e.innerText) : ""; };
