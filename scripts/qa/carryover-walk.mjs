@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
-import { execCli, isMain } from "../platform.mjs";
+import { execCli, isMain, slashes } from "../platform.mjs";
 import { pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -359,7 +359,7 @@ function readTheme(dir) {
     for (const f of readdirSync(full, { recursive: true })) {
       const p = join(full, String(f));
       if (!statSync(p).isFile() || !/\.(liquid|json)$/.test(p)) continue;
-      files[relative(dir, p)] = readFileSync(p, "utf8");
+      files[slashes(relative(dir, p))] = readFileSync(p, "utf8");
     }
   }
   return files;
