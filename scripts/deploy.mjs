@@ -4,7 +4,7 @@
 // while code kept being pushed; one more push of templates/index.json would have wiped it.
 // People edit a live Shopify theme in the editor, and a repo push does not know.
 //
-//   npm run deploy                   # QA, push code, then carry-over, forms, SEO, accessibility, widths, visual,
+//   npm run deploy                   # QA, push code, then carry-over, forms, SEO, accessibility, widths, browsers, visual,
 //                                    # live comparison, journeys and speed on the preview
 //   npm run deploy -- --skip-walks   # while iterating: no SEO or speed, and it says so (not for handover)
 //   npm run deploy -- --with-json    # also push your template/settings changes, only if safe
@@ -298,7 +298,7 @@ if (WITH_JSON) {
 // push; the theme is an unpublished preview (or a development store's live theme), so no customer has seen it. A FAIL here
 // means the preview is not ready to hand over, and the exit code says so.
 if (SKIP_WALKS) {
-  console.log("\nCarry-over, forms, SEO, accessibility, widths, visual, live comparison, journeys and speed NOT CHECKED (--skip-walks). Run a full npm run deploy before any handover.");
+  console.log("\nCarry-over, forms, SEO, accessibility, widths, Safari, Firefox and phones, visual, live comparison, journeys and speed NOT CHECKED (--skip-walks). Run a full npm run deploy before any handover.");
   process.exit(0);
 }
 if (!DOMAIN) {
@@ -339,6 +339,7 @@ for (const [label, script, env] of [
   ["SEO", "scripts/qa/seo-walk.mjs", { PREVIEW_URL }],
   ["accessibility", "scripts/qa/a11y-walk.mjs", { PREVIEW_URL }],
   ["widths", "scripts/qa/widths-walk.mjs", { PREVIEW_URL }],
+  ["Safari, Firefox and phones", "scripts/qa/browsers-walk.mjs", { PREVIEW_URL }],
   ["visual", "scripts/qa/visual-walk.mjs", { PREVIEW_URL }],
   // Live is the reference for these two. Before launch the live address still serves the old site,
   // which is not a Shopify theme to compare with, so they are left out and the QA pass says so.
@@ -365,6 +366,6 @@ if (process.env.SKIP_QA === "1") {
 let commit = null;
 try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
 writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun });
-console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, visual${PRELAUNCH ? "" : ", live comparison, journeys"} and speed all passed.`);
+console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, Safari, Firefox and phones, visual${PRELAUNCH ? "" : ", live comparison, journeys"} and speed all passed.`);
 if (notRun.length) console.log(`NOT CHECKED: ${notRun.join(", ")}${PRELAUNCH ? " (the live address still serves the old site)" : ""}. Say so in the handover.`);
 if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one; npm run approve asks them to confirm it.`);

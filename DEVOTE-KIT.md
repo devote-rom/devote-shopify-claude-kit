@@ -702,8 +702,12 @@ Each of these reached a client review once. They are here so they reach nobody e
   `webkit-iphone`) narrow a run. It goes one page and one browser at a time, so it never hammers a
   store; when Shopify answers 429 it waits 30 seconds, tries once more, then says NOT CHECKED:
   "Shopify is limiting requests from this computer; wait and run again". It needs
-  `playwright@1.64.0` (its WebKit is build 2370). Never run `npx playwright install`: on macOS 27 it
-  hangs, and its clean-up deletes other projects' browsers. Firefox is downloaded once into
+  `playwright@1.64.0` (its WebKit is build 2370). The kit's setup installs only WebKit, with
+  `PLAYWRIGHT_SKIP_BROWSER_GC=1` so it never deletes other projects' browsers; never run a plain
+  `npx playwright install`. If the WebKit install hangs unzipping (seen on macOS 27), download the
+  zip it names with `curl -L`, unpack it with `ditto -x -k` into
+  `~/Library/Caches/ms-playwright/webkit-2370/` and create an empty `INSTALLATION_COMPLETE` file
+  there. Firefox is downloaded once into
   `~/.cache/devote-kit/browsers` and, on a Mac, started with a fresh profile every run. Real Safari
   and the iOS Simulator are not in it yet.
 - **Look at every width yourself before a preview link goes to anyone.** The walk measures what it
