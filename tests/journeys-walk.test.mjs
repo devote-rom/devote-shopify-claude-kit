@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  cartCountFrom, compareJourney, isFormSend, isTracking, moneyMatches, newProblems, parseStep, pickProducts,
+  cartCountFrom, compareJourney, isFormSend, isPopupApp, isTracking, moneyMatches, newProblems, parseStep, pickProducts,
   pickVariantChange, problemKey, searchWord, stepLabel, stepVerdict, strategiesFor, STRATEGIES, validateJourneys,
 } from "../scripts/qa/journeys-walk.mjs";
 
@@ -202,4 +202,16 @@ test("the kit's journeys.json.example is a valid file", async (t) => {
   const file = new URL("../journeys.json.example", import.meta.url);
   if (!existsSync(file)) return t.skip("only in the kit itself");
   assert.deepEqual(validateJourneys(JSON.parse(readFileSync(file, "utf8"))).errors, []);
+});
+
+test("gift cards are never the product a journey tests", () => {
+  const p = (handle, avail, product_type = "") => ({ handle, product_type, variants: avail.map((a, i) => ({ id: i + 1, available: a })) });
+  const r = pickProducts([p("store-gift-card", [true, true]), p("e-voucher", [true, true], "Gift Card"), p("radio", [true, true])]);
+  assert.equal(r.variantProduct.handle, "radio");
+  assert.equal(r.buy.handle, "radio");
+});
+
+test("sign-up pop-up apps are kept from loading; the store's own scripts are not", () => {
+  for (const u of ["https://static.klaviyo.com/onsite/js/klaviyo.js?company_id=X", "https://static.klaviyo.com/onsite/js/fender_analytics.js", "https://widget.privy.com/assets/widget.js", "https://cdn.attn.tv/x/dtag.js"]) assert.ok(isPopupApp(u), u);
+  for (const u of ["https://shop.example.com/cdn/shop/t/1/assets/theme.js", "https://shop.example.com/cart.js", "https://www.googletagmanager.com/gtm.js"]) assert.ok(!isPopupApp(u), u);
 });

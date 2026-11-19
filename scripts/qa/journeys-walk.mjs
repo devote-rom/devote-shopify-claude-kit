@@ -27,7 +27,11 @@
 // goes past its first step, so no order is ever placed. Every cart the walk makes is cleared
 // (POST /cart/clear.js). No form is sent: posts to /contact, /account and email platform sign-ups
 // are blocked unless the journey says "submit": true, and analytics and ad pixel beacons are
-// blocked so the walk's add to carts and checkouts never reach the client's reports.
+// blocked so the walk's add to carts and checkouts never reach the client's reports. Sign-up pop-up
+// apps are kept from loading (a pop-up landing mid-click made the same store pass on one load and
+// fail on the next), and a theme's own sign-up pop-up is closed with its close button.
+// The walk loads about 100 pages; Shopify answers 429 to that many from one address in a few
+// minutes, which the walk reports as NOT CHECKED. Run it once, not in a loop.
 //
 // Built-in journeys (ids for "skip"): menu, drawer (phone only), search, collection, product, cart,
 // checkout. They find elements by meaning and Shopify convention (aria labels, /cart/add forms,
@@ -243,9 +247,11 @@ export function pickVariantChange(product, currentId) {
 
 /** The products worth testing: one with two available variants (a sold-out one too, if any has it), and one to buy. */
 export function pickProducts(products) {
-  const multi = (products || []).filter((p) => (p.variants || []).length > 1 && p.variants.filter((v) => v.available).length >= 2);
+  // a gift card's "variants" are amounts with their own pages and rules: never the product to test
+  products = (products || []).filter((p) => !/gift.?card/i.test(`${p.product_type || ""} ${p.handle || ""}`));
+  const multi = products.filter((p) => (p.variants || []).length > 1 && p.variants.filter((v) => v.available).length >= 2);
   const variantProduct = multi.find((p) => p.variants.some((v) => !v.available)) || multi[0] || null;
-  const buy = (products || []).find((p) => (p.variants || []).some((v) => v.available)) || null;
+  const buy = products.find((p) => (p.variants || []).some((v) => v.available)) || null;
   return { variantProduct, buy, buyVariant: buy?.variants.find((v) => v.available) || null };
 }
 
@@ -286,6 +292,18 @@ export function isTracking(url) {
   const hp = u.hostname + u.pathname;
   return /(google-analytics\.com|analytics\.google\.com|googleadservices\.com|doubleclick\.net|facebook\.com\/tr|analytics\.tiktok\.com|ct\.pinterest\.com|bat\.bing\.com|monorail-edge\.shopifysvc\.com|clarity\.ms\/collect|hotjar\.(com|io))/i.test(hp)
     || /\/g\/collect$|\/\.well-known\/shopify\/monorail|\/api\/collect$|\/client\/events\/?$/i.test(u.pathname);
+}
+
+/**
+ * Sign-up pop-up apps. Their pop-up opens a few seconds into a page at a time of its own, lands on
+ * top of whatever the walk was about to click, and took clicks on one store's filter and add to
+ * cart on one load and not the next. A shopper closes it; the walk keeps it from loading, so live
+ * and the preview are compared on the theme. (The forms walk checks these apps are still there.)
+ */
+export function isPopupApp(url) {
+  let u; try { u = new URL(url); } catch { return false; }
+  const hp = u.hostname + u.pathname;
+  return /(static\.klaviyo\.com\/onsite|klaviyo\.com\/forms|privy\.com|justuno\.com|omnisnippet|omnisrc\.com|attn\.tv|wisepops\.com|poptin\.com|optimonk\.com|getsitecontrol\.com|sumo\.com\/apps)/i.test(hp);
 }
 
 /** A problem as a key that is the same on live and the preview: no domains, query strings, ids or line numbers. */
@@ -371,6 +389,7 @@ function installHelpers() {
   window.__dj = {
     laid, seen, label, main,
     find(selectors, { root = document, mode = "seen", text = null } = {}) {
+      if (mode === "seen") window.__dj.closePopups();
       const r = typeof root === "string" ? document.querySelector(root) : root;
       if (!r) return null;
       for (const s of selectors) {
@@ -385,7 +404,7 @@ function installHelpers() {
       }
       return null;
     },
-    links: (root = document, mode = "seen") => [...root.querySelectorAll("a[href]")].filter(ok(mode)),
+    links: (root = document, mode = "seen") => { if (mode === "seen") window.__dj.closePopups(); return [...root.querySelectorAll("a[href]")].filter(ok(mode)); },
     snap() { window.__dj.before = new Set(window.__dj.links()); },
     fresh() {
       const b = window.__dj.before || new Set();
@@ -394,6 +413,17 @@ function installHelpers() {
     products(root) {
       const r = root || main();
       return [...new Set([...r.querySelectorAll('a[href*="/products/"]')].filter(laid).map((a) => new URL(a.href).pathname.replace(/^\/[a-z]{2}(-[a-z]{2})?\//i, "/")))];
+    },
+    // A sign-up pop-up (an email box in a dialog) covers the page and takes the click a shopper
+    // would close it first: close it the same way, with its own close button.
+    closePopups() {
+      let n = 0;
+      for (const d of document.querySelectorAll('[role="dialog"], [aria-modal="true"], dialog[open], [class*="popup" i], [id*="popup" i], [class*="modal" i]')) {
+        if (!laid(d) || !d.querySelector('input[type="email"], input[name*="email" i]') || d.closest("form[action*='/checkout'], [class*='cart' i]")) continue;
+        const close = [...d.querySelectorAll('[aria-label*="close" i], [class*="close" i], [aria-label*="dismiss" i], [class*="dismiss" i]')].find(laid);
+        if (close) { close.click(); n++; }
+      }
+      return n;
     },
     scrollers() {
       const out = [document.scrollingElement];
@@ -420,9 +450,13 @@ function makeCtx({ page, base, target, viewport, data, selectors }) {
       }
       if (res?.error) throw Object.assign(new Error(`${path} would not load: ${res.error}`), { notChecked: true });
       if (onPasswordPage(page.url())) throw Object.assign(new Error(`${path}: the store password page came back (set .storefront-password or STOREFRONT_PASSWORD)`), { notChecked: true });
+      // Shopify's bot check ("Just a moment... Your connection needs to be verified") after too many loads
+      if (await page.evaluate(() => /^just a moment/i.test(document.title) || /connection needs to be verified/i.test(document.body?.innerText || "")).catch(() => false))
+        throw Object.assign(new Error(`${path}: the store showed its bot check instead of the page (too many loads from this address); run the walk again later`), { notChecked: true });
       if (res && res.status() >= 400) throw Object.assign(new Error(`${path} returned ${res.status()}`), { status: res.status() });
       await page.waitForNetworkIdle({ idleTime: 500, timeout: 6000 }).catch(() => {});
       await page.mouse.move(2, innerHeightOf(viewport) - 2).catch(() => {});
+      await page.evaluate(() => window.__dj.closePopups()).catch(() => {});
     },
     async find(role, { root, mode = "seen", text } = {}) {
       const h = await page.evaluateHandle((sels, root, mode, text) => window.__dj.find(sels, { root: root || document, mode, text }),
@@ -449,6 +483,14 @@ function makeCtx({ page, base, target, viewport, data, selectors }) {
       return status;
     },
     async click(h) {
+      if (await page.evaluate(() => window.__dj.closePopups()).catch(() => 0)) await sleep(500);
+      // a drawer still sliding in moves the target under the pointer: wait until it stays put
+      let last = "";
+      for (let t = 0; t < 10; t++) {
+        const r = await h.evaluate((e) => { const b = e.getBoundingClientRect(); return `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)}`; }).catch(() => "");
+        if (r === last) break;
+        last = r; await sleep(150);
+      }
       try { await h.click(); } catch { await h.evaluate((e) => e.click()); }
     },
     // Records a step. fn returns { status, detail }; a thrown page that would not load is a fail with its status.
@@ -627,6 +669,9 @@ async function searchJourney(ctx) {
     return suggest ? { status: "fail", detail: "suggestions were asked for and none came on screen" } : { status: "none", detail: "this theme has no suggestions while typing" };
   });
   await ctx.step("Enter shows results on /search", async () => {
+    // a sign-up pop-up that opened while typing takes the focus: close it and go back to the box, as a shopper would
+    if (await page.evaluate(() => window.__dj.closePopups())) await sleep(500);
+    if (!(await input.evaluate((e) => document.activeElement === e || e.contains(document.activeElement)))) await ctx.click(input);
     await Promise.all([page.waitForNavigation({ waitUntil: "load", timeout: 20000 }).catch(() => null), page.keyboard.press("Enter")]);
     await page.waitForNetworkIdle({ idleTime: 500, timeout: 6000 }).catch(() => {});
     const u = new URL(page.url());
@@ -646,12 +691,23 @@ async function searchJourney(ctx) {
 // filter drawer, then use its label if the input itself is drawn as something else.
 async function reveal(ctx, h) {
   const { page } = ctx;
-  for (let t = 0; t < 3 && !(await h.evaluate((e) => window.__dj.laid(e))); t++) {
+  for (let t = 0; t < 4 && !(await h.evaluate((e) => window.__dj.laid(e))); t++) {
+    // a button that says it opens a box holding this one (aria-controls), as on popout lists and filter sidebars
+    const toggle = await h.evaluateHandle((e) => {
+      for (let x = e.parentElement; x; x = x.parentElement) {
+        if (!x.id) continue;
+        const b = [...document.querySelectorAll(`[aria-controls="${CSS.escape(x.id)}"]`)].find((b) => window.__dj.laid(b) && b.getAttribute("aria-expanded") !== "true");
+        if (b) return b;
+      }
+      return null;
+    });
+    const tg = toggle.asElement();
+    if (tg) { await ctx.click(tg); await sleep(700); continue; }
     const summary = await h.evaluateHandle((e) => { const d = [...(function* () { for (let x = e.parentElement; x; x = x.parentElement) if (x.tagName === "DETAILS" && !x.open) yield x; })()].pop(); return d ? d.querySelector(":scope > summary") : null; });
     const s = summary.asElement();
     if (s && (await s.evaluate((e) => window.__dj.laid(e)))) { await ctx.click(s); await sleep(500); continue; }
     const open = await ctx.find("filterOpen");
-    if (open && t === 0) { await ctx.click(open); await sleep(700); continue; }
+    if (open && t <= 1) { await ctx.click(open); await sleep(700); continue; }
     break;
   }
   if (await h.evaluate((e) => window.__dj.laid(e))) return h;
@@ -687,11 +743,15 @@ async function collectionJourney(ctx) {
     await first();
     const h = await ctx.find("sort", { mode: "laid", text: null }) || await ctx.find("sort", { mode: "any", text: null });
     if (!h) return notFound("no sort control (sort_by)", "sort");
-    const kind = await h.evaluate((e) => e.tagName === "SELECT" ? "select" : e.tagName === "A" ? "link" : "radio");
+    // a hidden sort_by input behind a dropdown of its own: options carry the value in data-value
+    const kind = await h.evaluate((e) => e.tagName === "SELECT" ? "select" : e.tagName === "A" ? "link" : e.type === "radio" ? "radio" : "option");
     const values = await page.evaluate(() => {
       const sel = document.querySelector('select[name="sort_by"]');
-      const radios = [...document.querySelectorAll('input[name="sort_by"]')];
-      return { all: sel ? [...sel.options].map((o) => o.value) : radios.map((r) => r.value), current: sel ? sel.value : (radios.find((r) => r.checked) || {}).value || new URLSearchParams(location.search).get("sort_by") };
+      const radios = [...document.querySelectorAll('input[type="radio"][name="sort_by"]')];
+      const opts = [...document.querySelectorAll("[data-value]")].map((e) => e.dataset.value).filter((v) => /^(manual|best-selling|most-relevant|title-|price-|created-)/.test(v));
+      const hidden = document.querySelector('input[name="sort_by"]:not([type="radio"])');
+      return { all: sel ? [...sel.options].map((o) => o.value) : radios.length ? radios.map((r) => r.value) : opts,
+        current: sel ? sel.value : (radios.find((r) => r.checked) || {}).value || hidden?.value || new URLSearchParams(location.search).get("sort_by") || "manual" };
     });
     const pick = ["price-descending", "price-ascending", "title-ascending", "created-descending"].find((v) => v !== values.current && (values.all.includes(v) || kind === "link")) || values.all.find((v) => v !== values.current);
     const url = page.url();
@@ -701,6 +761,11 @@ async function collectionJourney(ctx) {
     } else if (kind === "link") {
       const link = await ctx.css(`a[href*="sort_by=${pick}"]`) || await ctx.css(`a[href*="sort_by=${pick}"]`, "any") || h;
       const t = await reveal(ctx, link); if (!t) return { status: "fail", detail: "the sort links could not be opened on screen" };
+      await ctx.click(t);
+    } else if (kind === "option") {
+      const opt = await ctx.css(`[data-value="${pick}"]`) || await ctx.css(`[data-value="${pick}"]`, "any");
+      const t = opt && await reveal(ctx, opt);
+      if (!t) return { status: "fail", detail: "the sort options could not be opened on screen" };
       await ctx.click(t);
     } else {
       const radio = await ctx.css(`input[name="sort_by"][value="${pick}"]`) || await ctx.css(`input[name="sort_by"][value="${pick}"]`, "any");
@@ -740,7 +805,8 @@ async function chooseVariant(ctx, from, to, optionNames) {
     const h = await page.evaluateHandle((v, optName) => {
       const m = window.__dj.main();
       const scope = [...m.querySelectorAll("variant-picker, variant-selects, [class*=variant-picker i], [class*=variant i], form[action*='/cart/add'], product-form, [class*=product-form i]")];
-      const roots = scope.length ? scope : [m];
+      // the picker's own box first, then the whole product area (radios tied to the form by form= sit outside it)
+      const roots = [...scope, m];
       const inRoot = (sel) => roots.flatMap((r) => [...r.querySelectorAll(sel)]);
       const radios = inRoot('input[type="radio"]').filter((r) => r.value === v || r.dataset.value === v || r.dataset.optionValue === v);
       const radio = radios.find((r) => (r.closest("fieldset")?.textContent || r.name || "").toLowerCase().includes(String(optName).toLowerCase())) || radios[0];
@@ -943,14 +1009,19 @@ async function runOne({ browser, journey, target, base, viewport, data, selector
     page.on("request", (r) => {
       const url = r.url();
       requests.push(url);
-      if (isTracking(url) || (!journey.submit && isFormSend({ url, method: r.method(), postData: r.postData() || "" }))) {
-        if (!isTracking(url)) blocked.push(url);
+      if (isTracking(url) || isPopupApp(url) || (!journey.submit && isFormSend({ url, method: r.method(), postData: r.postData() || "" }))) {
+        if (!isTracking(url) && !isPopupApp(url)) blocked.push(url);
         return r.abort("blockedbyclient").catch(() => {});
       }
       return r.continue().catch(() => {});
     });
     page.on("pageerror", (e) => problems.push({ kind: "JS error", text: e.message }));
-    page.on("console", (m) => { if (m.type() === "error" && !/^Failed to load resource/.test(m.text())) problems.push({ kind: "console error", text: m.text() }); });
+    // console errors only from the store's own scripts: an app's retry message ("attempt 2/3") comes
+    // and goes between two loads of the same page and is not the theme's doing
+    page.on("console", (m) => {
+      const from = m.location()?.url || "";
+      if (m.type() === "error" && !/^Failed to load resource/.test(m.text()) && (!from || from.includes(host)) && /\/cdn\/shop\/t\/|\/assets\//.test(from)) problems.push({ kind: "console error", text: m.text() });
+    });
     page.on("response", (r) => {
       try {
         const u = new URL(r.url());

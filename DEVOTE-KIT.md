@@ -605,15 +605,19 @@ LIVE_URL='https://<domain>/' PREVIEW_URL='https://<domain>/?preview_theme_id=<id
    steps the walk's header lists.
 5. It never types into checkout or goes past its first step, so no order is placed, and it clears
    every cart it makes. It blocks form sends and analytics and ad pixel beacons, so the client
-   gets no test emails and no fake add to carts in their reports. Only a journey with
+   gets no test emails and no fake add to carts in their reports. Sign-up pop-up apps are kept
+   from loading, because a pop-up opening mid-click made one store pass on one load and fail on
+   the next; `npm run forms` checks those apps are still there. Only a journey with
    `"submit": true` sends a form, on the live site and the preview at both widths: point it at a
    test inbox or test list, never the client's real one.
 6. Prove it still catches a break with `JOURNEYS_TRY_JS='<script>' npm run journeys`, which runs
    the script on the preview only (stop the add to cart click, hide the submenus), then take it
    away.
 
-If the store answers 429 (too many requests), the walk waits and tries again, then says NOT
-CHECKED. Run it again a few minutes later; never read that as a pass.
+The walk loads about 100 pages, and Shopify answers 429 (too many requests) to that many from one
+address within minutes; on one store the limit stayed for over an hour. The walk waits and tries
+again, then says NOT CHECKED. Run it once, then again later if it was not checked, never in a
+loop, and never read NOT CHECKED as a pass.
 
 ### Logged in as each customer type
 
