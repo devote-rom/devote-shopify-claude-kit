@@ -71,7 +71,9 @@ import {
 import { pageList } from "./page-list.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { isMain } from "../platform.mjs";
-import { THROTTLED_MESSAGE, noteThrottle, pacedGoto, pacedFetch } from "./pace.mjs";
+import { THROTTLED_MESSAGE, noteThrottle, pace, pacedGoto, pacedFetch } from "./pace.mjs";
+
+const PRODUCT_JS = new Map();
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const OUT = join(ROOT, "parity", "journeys");
@@ -863,7 +865,15 @@ async function productJourney(ctx) {
     const r = await chooseVariant(ctx, pick.from, pick.to, names);
     if (!r.ok) return r.disabled ? { status: "fail", detail: r.detail } : notFound(`${r.detail} on /products/${p.handle}`, null);
     // the product's own data; a 429 or bot check page here is the store limiting this computer, not a fault
-    const got = await page.evaluate((h) => fetch(`/products/${h}.js`).then(async (x) => ({ status: x.status, text: await x.text() })), p.handle);
+    // read once per store and product, then reused: product data is the same at every width and on
+    // every theme, and Shopify limits repeated /products/<handle>.js reads quickly
+    const key = `${new URL(page.url()).host}/products/${p.handle}.js`;
+    let got = PRODUCT_JS.get(key);
+    if (!got) {
+      await pace(`https://${key}`);
+      got = await page.evaluate((h) => fetch(`/products/${h}.js`).then(async (x) => ({ status: x.status, text: await x.text() })), p.handle);
+      if (got.status === 200) PRODUCT_JS.set(key, got);
+    }
     try { js = JSON.parse(got.text); } catch {
       if (got.status === 429 || /just a moment/i.test(got.text.slice(0, 2000))) {
         noteThrottle(`/products/${p.handle}.js`, got.status === 429 ? "429" : "bot check");
