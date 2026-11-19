@@ -1,7 +1,8 @@
 // Walk: at every width from a small phone to a 2560 screen, every button label fits on one line with
 // its spaces, every dropdown chevron sits level with its label, the header menu stays clear of the
 // search, account and cart icons, no picture is drawn at a different shape from its file, no photo
-// leaves a gap in the frame it is meant to fill, and the page never scrolls sideways.
+// leaves a gap in the frame it is meant to fill, no text runs over other text or sits on a picture
+// it was not laid over on purpose, no text is cut off by its box, and the page never scrolls sideways.
 // WIDTH_SHOTS=<folder> also saves the top of each page at every width, to look at before reporting.
 //
 // Exists because the other walks measure 390px and 1440px only, and on one build every one of
@@ -12,28 +13,31 @@
 //   PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run widths
 // Pages: design/seo-pages.json, or WIDTH_PAGES. Steps of a multi-step form that start hidden are
 // opened and measured if they carry data-step. A page that could not be loaded is NOT CHECKED and
-// exits 1: it is never a pass.
+// exits 1: it is never a pass. design/widths.json (optional) lists text clipped or overlapping on
+// purpose: { "cutOffOk": ["selector"], "overlapOk": ["selector"] }.
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { isMain } from "../platform.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Phones to large tablets as well as laptops: a hero photo sized for 390px left bands down both
 // sides from about 420px to 767px on one build, and no width between 390 and 768 was checked.
 export const WIDTHS = [320, 360, 390, 414, 480, 540, 600, 640, 700, 767, 768, 820, 900, 990, 1024, 1100, 1180, 1280, 1300, 1366, 1440, 1600, 1920, 2560];
-const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
+export const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
 
 function pagesToCheck() {
-  if ((process.env.WIDTH_PAGES || process.env.BUTTON_PAGES)) return (process.env.WIDTH_PAGES || process.env.BUTTON_PAGES).split(",").map((s) => s.trim()).filter(Boolean);
-  const file = join(ROOT, "design", "seo-pages.json");
-  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).pages : ["/"];
+  // one page per type only: 24 widths of every state page would be hundreds of loads (scripts/qa/pace.mjs)
+  return pageList(process.env.WIDTH_PAGES ? "WIDTH_PAGES" : "BUTTON_PAGES", { states: false });
 }
 
 // Runs in the page: labels of visible buttons whose text runs over more than one line or out of the box.
-function wrappedButtons(selector) {
+export function wrappedButtons(selector) {
   const st = document.createElement("style");
   st.textContent = "* { content-visibility: visible !important; }";
   document.head.appendChild(st);
@@ -165,7 +169,7 @@ export function uncoveredPhotos() {
 // Runs in the page: flex boxes whose words run together. Flex drops the spaces between a text run
 // and an inline element (a price from the money filter prints its own <span>), so "Around $530"
 // rendered as "AROUND$530". Measured on screen: a space in the source must leave a gap.
-function joinedWords() {
+export function joinedWords() {
   const st = document.createElement("style");
   st.textContent = "* { content-visibility: visible !important; }";
   document.head.appendChild(st);
@@ -191,6 +195,234 @@ function joinedWords() {
   return out;
 }
 
+// ---------------------------------------------------------------------- text that clashes or is cut off
+//
+// On builds QA found text running over other text, a caption sitting on a product photo it was never
+// meant to cover, and labels cut off mid-word inside a box too small for them. The page gives the
+// boxes (textBoxes, cutOffCandidates); the rules are pure functions below, so they are tested.
+
+// design/widths.json, when the brand has one:
+//   "cutOffOk":  ["selector"]   text clipped on purpose (a product title the theme clamps to two lines)
+//   "overlapOk": ["selector"]   text that overlaps on purpose
+export function widthsConfig(root = ROOT) {
+  const file = join(root, "design", "widths.json");
+  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
+}
+
+const cross = (a, b) => [Math.min(a[2], b[2]) - Math.max(a[0], b[0]), Math.min(a[3], b[3]) - Math.max(a[1], b[1])];
+
+/**
+ * Pairs of text boxes from different blocks that cover each other by more than `min` pixels across
+ * and by more than half the shorter line's height. A box is { n: text node index, b: block
+ * index, r: [left, top, right, bottom], s: snippet }, its height already trimmed to the font size.
+ * Lines of one block are never compared, and a heading set with a line height under 1 (a display
+ * font's lines stacked into each other on purpose) is not a clash: text run over text covers most
+ * of a line.
+ */
+export function textOverlaps(boxes, { min = 3, share = 0.5 } = {}) {
+  const sorted = [...boxes].sort((a, b) => a.r[1] - b.r[1]);
+  const out = new Map();
+  for (let i = 0; i < sorted.length; i++) {
+    const a = sorted[i];
+    for (let j = i + 1; j < sorted.length && sorted[j].r[1] < a.r[3]; j++) {
+      const b = sorted[j];
+      if (a.b === b.b || a.n === b.n) continue;
+      const [w, h] = cross(a.r, b.r);
+      if (w > min && h > Math.max(min, share * Math.min(a.r[3] - a.r[1], b.r[3] - b.r[1]))) {
+        const key = [Math.min(a.n, b.n), Math.max(a.n, b.n)].join(",");
+        if (!out.has(key)) out.set(key, a.n < b.n ? [a, b] : [b, a]);
+      }
+    }
+  }
+  return [...out.values()];
+}
+
+/** Text boxes that sit on a picture by more than `min` pixels both ways: [text box, picture] pairs, one per text node and picture. */
+export function textOnPictures(boxes, pictures, { min = 3 } = {}) {
+  const out = new Map();
+  for (const t of boxes) for (const p of pictures) {
+    const [w, h] = cross(t.r, p.r);
+    if (w > min && h > min && !out.has(`${t.n},${p.i}`)) out.set(`${t.n},${p.i}`, [t, p]);
+  }
+  return [...out.values()];
+}
+
+/**
+ * Text cut off by its own box: the text is wider or taller than the box (overflow hidden or clip)
+ * shows. An item is { s, sw, cw, sh, ch, clipX, clipY, marked, label, ok }. Text that ends in an
+ * ellipsis or is clamped to a set number of lines (marked) is shortened by the theme on purpose (a
+ * long product title, a breadcrumb, a review excerpt), so it only counts on a button or a header menu
+ * link (label), where "Add to ca..." is a bug. Two pixels of slack: sub-pixel rounding and descenders are not cut off.
+ */
+export function cutOff(items, { slack = 2 } = {}) {
+  return items.filter((x) => !x.ok && x.cw > 0 && (!x.marked || x.label) && ((x.clipX && x.sw > x.cw + slack) || (x.clipY && x.ch > 0 && x.sh > x.ch + slack)));
+}
+
+// Runs in the page: every visible line of text as a box, and every visible picture. Hidden text
+// (display, visibility, opacity, a clip, a transparent colour, a box of 2px or less), text in a fixed
+// layer (a chat button, a cookie bar), text off the side of the page and text clipped away by an
+// ancestor's overflow do not count. Elements are kept on window for designedOverlay.
+export function textBoxes(okSelectors) {
+  const st = document.createElement("style");
+  st.textContent = "* { content-visibility: visible !important; }";
+  document.head.appendChild(st);
+  const vis = new Map();
+  const seen = (e) => {
+    if (vis.has(e)) return vis.get(e);
+    let ok = true;
+    if (!e.getClientRects().length) ok = false;
+    else {
+      const cs = getComputedStyle(e);
+      if (cs.visibility !== "visible" || cs.display === "none" || +cs.opacity === 0 || cs.position === "fixed") ok = false;
+      else if (/rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)/.test(cs.clip) || /inset\(50%\)/.test(cs.clipPath)) ok = false;
+      else { const r = e.getBoundingClientRect(); if (r.width <= 2 || r.height <= 2) ok = false; }
+      if (ok && e.parentElement && e.parentElement !== document.documentElement) ok = seen(e.parentElement);
+    }
+    vis.set(e, ok);
+    return ok;
+  };
+  // the rectangle left after the element and every ancestor that clips (a scroller is not one: the page itself can
+  // be a scroller, and a rail's cards sit side by side)
+  const clipOf = (e, r) => {
+    let [l, t, rr, b] = r;
+    for (let x = e; x && x !== document.documentElement; x = x.parentElement) {
+      const cs = getComputedStyle(x);
+      if (/hidden|clip/.test(cs.overflowX + cs.overflowY)) {
+        const c = x.getBoundingClientRect();
+        if (/hidden|clip/.test(cs.overflowX)) { l = Math.max(l, c.left); rr = Math.min(rr, c.right); }
+        if (/hidden|clip/.test(cs.overflowY)) { t = Math.max(t, c.top); b = Math.min(b, c.bottom); }
+      }
+      if (rr - l <= 1 || b - t <= 1) return null;
+    }
+    return [l, t, rr, b];
+  };
+  const blockOf = (e) => { for (let x = e; x; x = x.parentElement) if (!/^inline|^contents$/.test(getComputedStyle(x).display)) return x; return document.body; };
+  const ids = new Map();
+  const id = (e) => { if (!ids.has(e)) ids.set(e, ids.size); return ids.get(e); };
+  const W = document.documentElement.clientWidth;
+  const texts = [], els = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const e = n.parentElement;
+    if (!e || !n.textContent.trim() || e.closest("script, style, noscript, template, select, option, textarea, svg")) continue;
+    // a closed details shows its summary only (the content-visibility rule above lets the rest lay out)
+    if (e.closest("details:not([open])") && !e.closest("summary")) continue;
+    if (okSelectors.length && e.closest(okSelectors.join(", "))) continue;
+    if (!seen(e)) continue;
+    const cs = getComputedStyle(e);
+    if (/rgba\(.*,\s*0\)$/.test(cs.color) || cs.color === "transparent") continue;
+    const fs = parseFloat(cs.fontSize) || 0;
+    const range = document.createRange(); range.selectNodeContents(n);
+    const idx = els.length;
+    let any = false;
+    for (const q of range.getClientRects()) {
+      if (q.width <= 1 || q.height <= 4 || q.right <= 0 || q.left >= W) continue;
+      const inset = Math.max(0, (q.height - fs) / 2);
+      const r = clipOf(e, [q.left, q.top + inset, q.right, q.bottom - inset]);
+      if (!r) continue;
+      any = true;
+      texts.push({ n: idx, b: id(blockOf(e)), r: [r[0] + scrollX, r[1] + scrollY, r[2] + scrollX, r[3] + scrollY].map(Math.round), s: n.textContent.trim().replace(/\s+/g, " ").slice(0, 30) });
+    }
+    if (any) els.push(e);
+  }
+  const pictures = [], pics = [];
+  for (const p of document.querySelectorAll("img, video")) {
+    if (!seen(p) || (p.closest("details:not([open])") && !p.closest("summary"))) continue;
+    const q = p.getBoundingClientRect();
+    if (q.width < 24 || q.height < 24) continue;
+    const r = clipOf(p, [q.left, q.top, q.right, q.bottom]);
+    if (!r || r[2] - r[0] < 24 || r[3] - r[1] < 24) continue;
+    let name = p.getAttribute("alt") || "";
+    try { const u = new URL(p.currentSrc || p.src); if (/^https?:$/.test(u.protocol)) name = u.pathname.split("/").pop() || name; } catch {}
+    pictures.push({ i: pics.length, r: [r[0] + scrollX, r[1] + scrollY, r[2] + scrollX, r[3] + scrollY].map(Math.round), s: (name || "(no name)").slice(0, 50) });
+    pics.push(p);
+  }
+  window.__qaText = els; window.__qaPics = pics;
+  return { texts, pictures };
+}
+
+// Runs in the page: of [text node index, picture index] pairs, the ones NOT laid over the picture on
+// purpose. On purpose means: the text, or a box it sits in, is positioned absolutely over the
+// picture (a hero caption, a sale badge); or the picture is a background, placed absolutely in a box
+// that also holds the text (a banner); or the two share a grid cell (stacked with grid on purpose).
+export function designedOverlay(pairs) {
+  const out = [];
+  for (const [ti, pi] of pairs) {
+    const t = window.__qaText[ti], p = window.__qaPics[pi];
+    if (!t || !p) continue;
+    let common = t;
+    while (common && !common.contains(p)) common = common.parentElement;
+    if (!common) continue;
+    let designed = /grid/.test(getComputedStyle(common).display);
+    for (let x = t; !designed && x && x !== common; x = x.parentElement) if (/absolute|fixed|sticky/.test(getComputedStyle(x).position)) designed = true;
+    // the picture's outermost absolutely placed box, if any: a background when it is placed
+    // against a box that holds the text as well
+    for (let x = p; !designed && x && x !== common; x = x.parentElement) {
+      if (/absolute|fixed/.test(getComputedStyle(x).position)) {
+        const cb = x.offsetParent || document.body;
+        if (cb.contains(t)) designed = true;
+      }
+    }
+    if (!designed) out.push([ti, pi]);
+  }
+  return out;
+}
+
+// Runs in the page: every visible element holding text of its own in a box that clips it (overflow
+// hidden or clip, or an ellipsis), with its sizes for cutOff().
+export function cutOffCandidates(okSelectors) {
+  const out = [];
+  for (const e of document.body.querySelectorAll("*")) {
+    if (![...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim())) continue;
+    if (e.closest("script, style, noscript, template, select, option, textarea, svg")) continue;
+    if (e.closest("details:not([open])") && !e.closest("summary")) continue;
+    const cs = getComputedStyle(e);
+    const clipX = /hidden|clip/.test(cs.overflowX) || cs.textOverflow === "ellipsis", clipY = /hidden|clip/.test(cs.overflowY);
+    if (!clipX && !clipY) continue;
+    if (!e.getClientRects().length || cs.visibility !== "visible" || cs.display === "none") continue;
+    if (/rect\(0(px)?,? 0(px)?,? 0(px)?,? 0(px)?\)/.test(cs.clip) || /inset\(50%\)/.test(cs.clipPath)) continue;
+    let shown = true;
+    for (let x = e; x && x !== document.documentElement; x = x.parentElement) {
+      const xs = getComputedStyle(x), r = x.getBoundingClientRect();
+      if (+xs.opacity === 0 || xs.visibility !== "visible" || r.width <= 2 || r.height <= 2) { shown = false; break; }
+    }
+    if (!shown) continue;
+    out.push({
+      s: e.textContent.trim().replace(/\s+/g, " ").slice(0, 40),
+      sw: e.scrollWidth, cw: e.clientWidth, sh: e.scrollHeight, ch: e.clientHeight, clipX, clipY,
+      marked: cs.textOverflow === "ellipsis" || (cs.webkitLineClamp && cs.webkitLineClamp !== "none"),
+      label: Boolean(e.closest('button, a.button, [role="button"], input[type="submit"], :is(a, button)[class*="button"], :is(a, button)[class*="btn"], header nav a, #header-component nav a')),
+      ok: okSelectors.length ? Boolean(e.closest(okSelectors.join(", "))) : false,
+    });
+  }
+  return out;
+}
+
+/**
+ * Every in-page check above on the page as it is now, as plain-English findings (one per problem).
+ * evaluate(fn, ...args) runs fn in the page: puppeteer's page.evaluate, or the browsers walk's
+ * runner for WebKit and Firefox, so both walks check with this one copy. Note it opens hidden
+ * data-step form steps, so read anything else from the page first.
+ */
+export async function pageFindings(evaluate, cfg = {}) {
+  const found = [];
+  await evaluate(() => document.fonts.ready);
+  for (const label of new Set(await evaluate(wrappedButtons, BUTTONS))) found.push(`"${label}" wraps`);
+  for (const msg of await evaluate(headerClash)) found.push(msg);
+  for (const label of new Set(await evaluate(joinedWords))) found.push(`"${label}" has words run together`);
+  for (const name of new Set(await evaluate(squashedImages))) found.push(`picture squashed: ${name}`);
+  for (const msg of new Set(await evaluate(uncoveredPhotos))) found.push(`photo gap: ${msg.replace(/\d+px/g, "Npx")}`);
+  const { texts, pictures } = await evaluate(textBoxes, cfg.overlapOk || []);
+  for (const [a, b] of textOverlaps(texts)) found.push(`text overlaps text: "${a.s}" and "${b.s}"`);
+  const onPics = textOnPictures(texts, pictures);
+  const stray = new Set((await evaluate(designedOverlay, onPics.map(([t, p]) => [t.n, p.i]))).map((x) => x.join(",")));
+  for (const [t, p] of onPics) if (stray.has(`${t.n},${p.i}`)) found.push(`text sits on a picture: "${t.s}" on ${p.s}`);
+  for (const x of new Set(cutOff(await evaluate(cutOffCandidates, cfg.cutOffOk || [])).map((x) => x.s))) found.push(`text cut off: "${x}"`);
+  const wide = await evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (wide > 1) found.push("page scrolls sideways");
+  return [...new Set(found)];
+}
+
 async function main() {
   const RAW = process.env.PREVIEW_URL || process.argv.find((a) => a.startsWith("http"));
   if (!RAW) { console.log("Nothing checked. Give it the preview URL:\n  PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run widths"); process.exit(1); }
@@ -200,6 +432,7 @@ async function main() {
   const chrome = Launcher.getInstallations()[0];
   if (!chrome) { console.log("NOT CHECKED: no Chrome found on this machine."); process.exit(1); }
   const browser = await puppeteer.launch({ executablePath: chrome, headless: true });
+  const cfg = widthsConfig();
   let fails = 0, unchecked = 0;
   try {
     for (const path of pagesToCheck()) {
@@ -208,17 +441,10 @@ async function main() {
       const found = {};
       for (const w of WIDTHS) {
         await page.setViewport({ width: w, height: 900, deviceScaleFactor: 1 });
-        const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-        if (res?.error || (res && res.status && res.status() >= 400)) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
+        const res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+        if (res?.error || (res && res.status && !statusOk(path, res.status()))) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
         if (onPasswordPage(page.url())) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); continue; }
-        await page.evaluate(() => document.fonts.ready);
-        for (const label of new Set(await page.evaluate(wrappedButtons, BUTTONS))) (found[`"${label}" wraps`] ||= []).push(w);
-        for (const msg of await page.evaluate(headerClash)) (found[msg] ||= []).push(w);
-        for (const label of new Set(await page.evaluate(joinedWords))) (found[`"${label}" has words run together`] ||= []).push(w);
-        for (const name of new Set(await page.evaluate(squashedImages))) (found[`picture squashed: ${name}`] ||= []).push(w);
-        for (const msg of new Set(await page.evaluate(uncoveredPhotos))) (found[`photo gap: ${msg.replace(/\d+px/g, "Npx")}`] ||= []).push(w);
-        const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-        if (wide > 1) (found["page scrolls sideways"] ||= []).push(w);
+        for (const msg of await pageFindings((fn, ...args) => page.evaluate(fn, ...args), cfg)) (found[msg] ||= []).push(w);
         if (process.env.WIDTH_SHOTS) {
           const { mkdirSync } = await import("node:fs");
           mkdirSync(process.env.WIDTH_SHOTS, { recursive: true });

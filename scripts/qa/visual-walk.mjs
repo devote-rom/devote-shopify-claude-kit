@@ -10,7 +10,7 @@
 //   npm run visual -- --approve        a person only, after opening every marked picture (Claude never
 //                                      runs it: ship gate rule 6). npm run approve does the same for a release.
 //
-// Pages: design/seo-pages.json, or VISUAL_PAGES. Widths: 390, 768, 1024, 1440.
+// Pages: design/seo-pages.json plus design/state-pages.json (scripts/qa/page-list.mjs), or VISUAL_PAGES. Widths: 390, 768, 1024, 1440.
 // Approved screenshots live in design/visual-baseline/ (not committed: a machine with none says
 // NO BASELINE and fails until someone has looked at every page and approved). Current shots and
 // the marked pictures go to parity/visual/.
@@ -34,7 +34,9 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const WIDTHS = [390, 768, 1024, 1440];
@@ -72,10 +74,10 @@ function config() {
   return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
 }
 
-function pagesToCheck() {
-  if (process.env.VISUAL_PAGES) return process.env.VISUAL_PAGES.split(",").map((s) => s.trim()).filter(Boolean);
-  const file = join(ROOT, "design", "seo-pages.json");
-  return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).pages : ["/"];
+// The pages a walk checks: a comma list in the env variable named, else design/seo-pages.json, else
+// the homepage. Exported for the other walks (the live compare walk uses LIVE_PAGES).
+export function pagesToCheck(envVar = "VISUAL_PAGES") {
+  return pageList(envVar);
 }
 
 function withPreview(path, base) {
@@ -88,7 +90,7 @@ function withPreview(path, base) {
 // Runs in the page: freeze everything that moves, load everything lazy, scroll the page's own
 // scroller to the end and back so scroll-triggered loading runs, then unroll it for one tall shot.
 // The scroll happens before the unroll so a sticky header sees the page return to the top.
-async function settle(masks, tryCss) {
+export async function settle(masks, tryCss) {
   const st = document.createElement("style");
   st.textContent = `*, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; scroll-behavior: auto !important; content-visibility: visible !important; }
     ${masks.length ? `${masks.join(", ")} { visibility: hidden !important; }` : ""}
@@ -112,7 +114,7 @@ async function settle(masks, tryCss) {
 }
 
 // Runs in the page: every image loaded and decoded, or 10 seconds, whichever comes first.
-async function imagesDone() {
+export async function imagesDone() {
   document.querySelectorAll('img[loading="lazy"]').forEach((i) => { i.loading = "eager"; });
   await Promise.race([
     Promise.all([...document.images].map((i) => (i.complete ? (i.decode ? i.decode().catch(() => {}) : null) : new Promise((r) => { i.onload = i.onerror = r; })))),
@@ -187,8 +189,8 @@ async function main() {
         if (["xhr", "fetch"].includes(r.resourceType()) && +u.searchParams.get("page") > 1) r.abort(); else r.continue();
       });
       await applyCookies(page, base.toString());
-      const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-      if (res?.error || (res?.status && res.status() >= 400)) { unchecked++; return `NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`; }
+      const res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+      if (res?.error || (res?.status && !statusOk(path, res.status()))) { unchecked++; return `NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`; }
       if (onPasswordPage(page.url())) { unchecked++; return `NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`; }
       // the pointer starts at the top-left corner, over the header; a transparent header hovered
       // turns solid, so park it off the page

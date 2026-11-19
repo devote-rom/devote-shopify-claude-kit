@@ -242,8 +242,12 @@ npm run parity -- <name>              # only states whose name contains <name>, 
 npm run carryover                     # what the live theme does that the new build must keep, before building and in every deploy
 npm run seo                           # on-page SEO on the preview, one page per type, before every handover
 npm run a11y                          # WCAG 2.2 AA (axe-core) on the preview, phone and desktop, before every handover
-npm run widths                        # buttons, chevrons, header, photo gaps, sideways scroll at 24 widths, 320px to 2560px
+npm run widths                        # buttons, chevrons, header, photo gaps, text overlaps and cut-off text, sideways scroll at 24 widths, 320px to 2560px
+npm run browsers                      # Safari's engine (desktop, iPhone, iPad), Firefox (1440px, 390px) and an Android phone, each against Chrome
 npm run visual                        # every page at four widths against the last approved screenshots
+npm run live                          # the preview against the live site: text, sections and type styles at 390px and 1440px
+npm run journeys                      # menus, phone drawer, search, filters, variants, cart and checkout clicked through, live vs preview
+npm run pages                         # find sold-out, sale, many-variant and long-title products, an empty collection; writes design/state-pages.json
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
 npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
@@ -521,6 +525,142 @@ strictly, because three chevrons lifted 12px change only about 100 pixels. A wal
 gets ignored: if two runs on unchanged code disagree, fix the walk before trusting it. Prove it
 still catches a real change with `VISUAL_TRY_CSS='<css>' npm run visual`.
 
+## Every page type and state is checked
+
+`design/seo-pages.json` has one page of each type. Most layout bugs hide in states those pages do
+not show: a sold-out product, a product on sale, the product with the most variants, the longest
+product title, an empty collection, search with no results, the 404 page, the cart and the login
+page. `npm run pages` finds those from the live store (two public requests) and writes
+`design/state-pages.json`, each entry with why it is there. Deploy runs it when the file is missing
+or a month old. Commit it, and swap in a better example by hand when you know one.
+
+The visual, widths, accessibility and live comparison walks open every page in both files. The
+404 page is meant to return 404; every other page under 400. The speed walk measures the homepage,
+the first collection and the first product, mobile and desktop, each against the same page on live.
+
+## Nothing on live goes missing on the preview
+
+The visual walk compares a build with its own earlier screenshots, so the first build of a theme is
+never compared with anything. The most common QA finding over a year was "differs from live": text
+gone, a section gone, a heading or button font, size, weight or colour changed, prices styled
+differently. `npm run live` checks exactly that, with the live site as the reference:
+
+```bash
+PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' LIVE_URL='https://<domain>/' npm run live
+```
+
+For every page in `design/seo-pages.json` (or `LIVE_PAGES`), at 390px and 1440px, it reads both
+sites and fails on:
+
+- text on live that is not anywhere on the preview (text the preview adds is listed, not failed)
+- a section gone, or the sections in a different order (header and footer count)
+- a kind of text that looks different: h1 to h6, paragraphs, buttons, prices and header menu
+  links, each compared on font, size, weight, colour, letter spacing, capitals and line height,
+  taking the most common value so one odd element does not decide it
+
+Live is loaded twice. Anything that changed between those two loads (a timer, a stock count, a
+review count, a rotating line) is left out and listed in the report as dynamic. The full report is
+`parity/live-compare/report.md`, with every section on each side by name.
+
+A difference the brief asked for goes in `design/live-compare.json` with the reason, so it is
+listed as expected instead of failing:
+
+```json
+{
+  "expected": [{ "page": "/", "kind": "section", "match": "image_banner", "why": "the brief drops the old banner" }],
+  "ignore": [".review-widget"],
+  "skip": ["/search"]
+}
+```
+
+`kind` is `text`, `section` or `style`; `match` is a piece of the text, part of the section's
+name, or a style role (`h2`, or `h2 font-size`); `page` is a path, a path ending in `*`, or `*`.
+`ignore` hides a selector on both sites before reading, for something that changes but did not
+happen to change between the two live loads. Every entry needs a reason a person can check.
+Prove the walk still catches a change with `LIVE_COMPARE_TRY_CSS='h2{font-size:31px!important}'`:
+it adds the CSS to the preview only.
+
+## Every journey a shopper takes still works
+
+Every other walk only loads pages, and a page can look right while nothing on it works. A QA
+tester's findings over one year held about 580 in things you have to use: the menus and the phone
+drawer, search, filters, sort and page 2, variant pickers and their prices, add to cart and the
+slide cart, checkout, forms and back in stock. `npm run journeys` clicks and types through them on
+the live site and on the preview, at 1440px and on a 390px phone, and compares the two:
+
+```bash
+LIVE_URL='https://<domain>/' PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run journeys
+```
+
+1. A step that works on live and fails on the preview is a FAIL. So is a JS error or a 4xx or 5xx
+   from the store's own domain on the preview that never happened on live. A picture of the
+   preview at each failed step goes to `parity/journeys/`: open it before you fix anything.
+2. A step that fails on live too is listed and does not fail the build, but the store has the
+   problem: tell the person.
+3. NOT FOUND means the walk could not find the menu button, add to cart button or whatever it
+   names on this theme. It is never a pass. Give it the theme's selector in
+   `design/journeys.json` under `"selectors"`, or leave that journey out under `"skip"` with the
+   reason (the walk's header lists the roles). Copy `journeys.json.example` from the kit to start.
+4. Journeys of the brand's own (a size guide, a store finder, a quiz) go in the same file, in the
+   steps the walk's header lists.
+5. It never types into checkout or goes past its first step, so no order is placed, and it clears
+   every cart it makes. It blocks form sends and analytics and ad pixel beacons, so the client
+   gets no test emails and no fake add to carts in their reports. Sign-up pop-up apps are kept
+   from loading, because a pop-up opening mid-click made one store pass on one load and fail on
+   the next; `npm run forms` checks those apps are still there. Only a journey with
+   `"submit": true` sends a form, on the live site and the preview at both widths: point it at a
+   test inbox or test list, never the client's real one.
+6. Prove it still catches a break with `JOURNEYS_TRY_JS='<script>' npm run journeys`, which runs
+   the script on the preview only (stop the add to cart click, hide the submenus), then take it
+   away.
+
+The walk loads about 100 pages, and Shopify answers 429 (too many requests) to that many from one
+address within minutes; on one store the limit stayed for over an hour. The walk waits and tries
+again, then says NOT CHECKED. Run it once, then again later if it was not checked, never in a
+loop, and never read NOT CHECKED as a pass.
+
+### Logged in as each customer type
+
+On a wholesale or trade store, customer tags (VIP, trade, a country) change prices, labels, what
+can be bought and what the cart allows. A QA tester found about 75 problems in a year that only
+showed when logged in as one of those customers. List each type under `"customers"` in
+`design/journeys.json` and the walk logs in as it on live and on the preview, each in its own
+browser session, then:
+
+1. Runs the product and cart journeys, and any journey of the brand's own marked
+   `"customers": true`, as that customer on both sites.
+2. Reads the price, compare-at price, price labels and whether it can be added to the cart on each
+   product page in `design/seo-pages.json` and `design/state-pages.json`. Any difference between
+   live and the preview for the same customer FAILS.
+3. Says how that customer's prices differ from a guest's on live. With
+   `"expect": { "priceDiffersFromGuest": true }`, live showing guest prices FAILS: the test account
+   is probably missing its tag, and every other check as that customer means nothing until it is
+   fixed.
+4. Clears the customer's cart and logs out on both sites. It never changes account details,
+   addresses or orders, never goes past the first checkout step and never places an order.
+
+Setting up a test customer, once per type:
+
+1. A person creates the customer on the store (Customers, Add customer) with the tag that type
+   uses, activates the account and sets its password. Ask the store owner first: it is their
+   store. Claude never creates a customer account, on any store.
+2. They save the email and password as a login item in 1Password, in a vault the team shares.
+3. In `design/journeys.json`, the customer's `"login"` and `"password"` are that item's secret
+   references (in 1Password, the field's menu, Copy Secret Reference), such as
+   `op://Shopify QA/Example VIP/password`. Copy `journeys.json.example` to start.
+
+The walk reads them at run time with the 1Password CLI (`op read`), so 1Password must be open and
+unlocked on the Mac. A plain email or password in the file is refused: the file is committed. In
+CI, set `JOURNEYS_<NAME>_LOGIN` and `JOURNEYS_<NAME>_PASSWORD` (`JOURNEYS_VIP_LOGIN`,
+`JOURNEYS_TRADE_AU_PASSWORD`) from the CI's own secret store; they win over the file and follow
+the same rule. The walk never prints, logs or saves a login or password, and hides them on the
+page before any picture.
+
+A customer is NOT CHECKED, never skipped, when `op` is missing or not signed in, a reference does
+not exist, the store refuses the login, or Shopify asks for a captcha. A store on Shopify's new
+customer accounts signs in with a code sent by email, so the walk says NOT CHECKED and does not
+try to get around it. `JOURNEYS_ONLY=customers npm run journeys` runs just the logged-in part.
+
 ## Lessons from real builds
 
 Each of these reached a client review once. They are here so they reach nobody else.
@@ -534,6 +674,46 @@ Each of these reached a client review once. They are here so they reach nobody e
   768px to 1180px, and every check at 390px and 1440px passed. On another, a hero photo sized for a
   390px phone left bands down both sides from 540px to 767px (large phones, small tablets), a width
   range the walk did not visit until then.
+- **Text over text, text on a photo, text cut off.** QA kept finding these on builds that passed
+  every other check. The widths walk now fails text that runs over other text, text sitting on a
+  picture it was not laid over on purpose (a caption placed absolutely over a hero, or a banner
+  photo set behind its text, is fine), and text its own box cuts off. An ellipsis or a line clamp
+  is the theme shortening a long title on purpose, so it only fails on a button or header menu
+  link. Anything clipped or overlapping on purpose goes in `design/widths.json`:
+  `{ "cutOffOk": ["selector"], "overlapOk": ["selector"] }`, with the reason in the brand's notes.
+- **Chrome is not the only browser.** Every other walk runs in headless Chrome, and over a year
+  a QA tester logged about 130 findings that only showed in Safari (desktop, iPhone, iPad), Firefox
+  or at Android sizes: a layout broken in Safari, a sticky header misbehaving, flex gaps, fonts,
+  buttons overflowing on an iPhone. `npm run browsers` loads every page in WebKit (the engine Safari
+  uses) at 1440px, as an iPhone 15 and as an iPad, in Firefox at 1440px and 390px, and in Chrome set
+  up as an Android phone (Pixel 7), and compares each with Chrome at the same size:
+
+  ```bash
+  PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run browsers
+  ```
+
+  It runs the widths walk's checks in each browser and fails what turns up there and not in
+  Chrome, then compares where the header, the main menu, every h1 and h2, every button and every
+  price sit. A box more than 8px out (14px on a 1440px screen) fails as "different in <browser>
+  at <size>", and so does text that runs out of its box in one browser only. Only the first box of
+  a shift is named, with "everything below it moves with it", and the allowance grows a little
+  over long stretches of text, because every browser draws fonts a pixel or two taller or shorter.
+  On one live store it found the footer's Quick Links heading sitting 30px below the other column
+  headings in Safari's engine, at desktop and iPad sizes. Pictures of both browsers, with the
+  differences outlined in red, go to `parity/browsers/`, and the full list to
+  `parity/browsers/report.md`. Look at both pictures for every difference before calling it real.
+  `BROWSERS_PAGES` and `BROWSERS_ENGINES` (`webkit`, `firefox`, or a row such as
+  `webkit-iphone`) narrow a run. It goes one page and one browser at a time, so it never hammers a
+  store; when Shopify answers 429 it waits 30 seconds, tries once more, then says NOT CHECKED:
+  "Shopify is limiting requests from this computer; wait and run again". It needs
+  `playwright@1.64.0` (its WebKit is build 2370). The kit's setup installs only WebKit, with
+  `PLAYWRIGHT_SKIP_BROWSER_GC=1` so it never deletes other projects' browsers; never run a plain
+  `npx playwright install`. If the WebKit install hangs unzipping (seen on macOS 27), download the
+  zip it names with `curl -L`, unpack it with `ditto -x -k` into
+  `~/Library/Caches/ms-playwright/webkit-2370/` and create an empty `INSTALLATION_COMPLETE` file
+  there. Firefox is downloaded once into
+  `~/.cache/devote-kit/browsers` and, on a Mac, started with a fresh profile every run. Real Safari
+  and the iOS Simulator are not in it yet.
 - **Look at every width yourself before a preview link goes to anyone.** The walk measures what it
   can name (a photo gap, a wrapped button, sideways scroll), not whether a layout looks right: on
   the same build a photo shrank into a corner under empty sky at tablet widths and passed every

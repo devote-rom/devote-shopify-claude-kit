@@ -22,6 +22,7 @@
 // or inbox. See "Forms keep their destination" in DEVOTE-KIT.md.
 import { cookieHeader, mergeCookies } from "./preview-session.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedFetch } from "./pace.mjs";
 
 // ------------------------------------------------------------------------------ pure functions
 
@@ -103,7 +104,7 @@ export function pagesFromSitemap(xml) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function get(url, cookie = "", tries = 4) {
   for (let i = 0; i < tries; i++) {
-    const r = await fetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote forms walk)", ...(cookie ? { cookie } : {}) } }).catch(() => null);
+    const r = await pacedFetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote forms walk)", ...(cookie ? { cookie } : {}) } }).catch(() => null);
     if (r && r.status === 429) { await sleep(2000 * (i + 1)); continue; }
     if (!r || !r.ok) return null;
     return r.text();
@@ -122,7 +123,7 @@ async function main() {
   // (PREVIEW_COOKIE from deploy.mjs), while LIVE is the old site: preview pages are built from
   // PREVIEW's own origin, never LIVE's.
   const pass = cookieHeader();
-  const first = await fetch(PREVIEW, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0 (Devote forms walk)", ...(pass ? { cookie: pass } : {}) } }).catch(() => null);
+  const first = await pacedFetch(PREVIEW, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0 (Devote forms walk)", ...(pass ? { cookie: pass } : {}) } }).catch(() => null);
   const cookie = mergeCookies(pass, (first?.headers.getSetCookie?.() || []).map((c) => c.split(";")[0]).join("; "));
   const theme = new URL(PREVIEW).searchParams.get("preview_theme_id");
   const previewBase = new URL(PREVIEW).origin;

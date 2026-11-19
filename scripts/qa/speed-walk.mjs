@@ -8,13 +8,21 @@
 // Needs network, Chrome and npx, so it is a walk, run by hand, not part of `npm run qa`.
 //   PREVIEW_URL=... LIVE_URL=... npm run speed        # RUNS=3 by default
 //
+// Pages: the homepage, the first collection and the first product in design/seo-pages.json, or
+// SPEED_PAGES (comma-separated paths). Until 1.8.0 only the homepage was measured, and a QA tester
+// logged 78 slow-page findings in a year, most of them product and collection pages.
+//
 // Prints the median of RUNS for each page and form factor. Exits 1 when the preview is slower
 // than live on score or LCP, so a worse result is the report, not a footnote. A run that
 // produces no result fails loudly; it is never counted as a pass.
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
+import { speedPages } from "./page-list.mjs";
 import { execCli } from "../platform.mjs";
 
 const PREVIEW_RAW = process.env.PREVIEW_URL || process.argv[2];
@@ -85,6 +93,11 @@ async function lighthouse(url, desktop, i, cookie) {
   };
 }
 
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const SEO = join(ROOT, "design", "seo-pages.json");
+const PAGES = speedPages(existsSync(SEO) ? JSON.parse(readFileSync(SEO, "utf8")).pages || [] : [], process.env.SPEED_PAGES || "");
+const at = (raw, path) => { const b = new URL(raw); const u = new URL(path, b.origin); for (const [k, v] of b.searchParams) if (!u.searchParams.has(k)) u.searchParams.set(k, v); return u.toString(); };
+
 const median = (xs) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 async function measure(url, desktop, cookie = "") {
   const runs = [];
@@ -94,14 +107,16 @@ async function measure(url, desktop, cookie = "") {
 }
 
 let worse = false;
-console.log(`Median of ${RUNS} Lighthouse runs each\n`);
-console.log("form     page     score   LCP s   TBT ms   CLS     KB");
+console.log(`Median of ${RUNS} Lighthouse runs each, on ${PAGES.join(", ")}\n`);
+for (const path of PAGES) {
+console.log(`${path}\nform     page     score   LCP s   TBT ms   CLS     KB`);
+const LIVE_P = at(LIVE, path), PREVIEW_P = at(PREVIEW, path);
 for (const desktop of [false, true]) {
   const form = desktop ? "desktop" : "mobile ";
   let live, prev;
   try {
-    live = await measure(LIVE, desktop);
-    prev = await measure(PREVIEW, desktop, COOKIE);
+    live = await measure(LIVE_P, desktop);
+    prev = await measure(PREVIEW_P, desktop, COOKIE);
   } catch (e) {
     console.log(String(e.message || e));
     process.exit(1);
@@ -113,13 +128,15 @@ for (const desktop of [false, true]) {
     if (PRELAUNCH) console.log(`  slower than the old site on ${form.trim()} (not a fail before launch: the old site is not a Shopify theme)`);
     else {
       worse = true;
-      console.log(`  WORSE: the preview is slower than live on ${form.trim()}`);
+      console.log(`  WORSE: the preview is slower than live on ${form.trim()} (${path})`);
     }
   }
   if (!desktop && prev.score <= MOBILE_FLOOR) {
     worse = true;
-    console.log(`  BELOW THE BENCHMARK: mobile scores ${prev.score}, and it must be above ${MOBILE_FLOOR}`);
+    console.log(`  BELOW THE BENCHMARK: mobile scores ${prev.score} on ${path}, and it must be above ${MOBILE_FLOOR}`);
   }
+}
+console.log("");
 }
 console.log("\nThe preview bar is hidden (pb=0); the preview redirect (about 800 ms) still counts against the preview.");
 if (PRELAUNCH) console.log(`The store has not launched: "old site" is ${LIVE}, the client's current site, shown for comparison only.`);

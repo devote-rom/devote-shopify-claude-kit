@@ -29,6 +29,7 @@ if (!target.store || !target.theme) { console.log("package.json's deploy script 
 const pass = readQaPass();
 const qa = qaPassVerdict(pass, { codeHash: codeHash(), store: target.store, theme: target.theme });
 if (!qa.ok) { console.log(`Not approved: ${qa.why}.`); process.exit(1); }
+if (pass.notRun?.length) console.log(`Not checked by the walks on this deploy: ${pass.notRun.join(", ")}. Check those by hand on the review link.`);
 // Pictures that changed since the last baseline: the approver says they looked at each one.
 const pictures = pass.visualPending || [];
 if (pictures.length && !process.argv.includes("--pictures-checked")) {

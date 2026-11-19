@@ -4,7 +4,8 @@
 // while code kept being pushed; one more push of templates/index.json would have wiped it.
 // People edit a live Shopify theme in the editor, and a repo push does not know.
 //
-//   npm run deploy                   # QA, push code, then carry-over, forms, SEO, accessibility and speed on the preview
+//   npm run deploy                   # QA, push code, then carry-over, forms, SEO, accessibility, widths, browsers, visual,
+//                                    # live comparison, journeys and speed on the preview
 //   npm run deploy -- --skip-walks   # while iterating: no SEO or speed, and it says so (not for handover)
 //   npm run deploy -- --with-json    # also push your template/settings changes, only if safe
 //   npm run deploy -- --pull         # just bring editor changes and other people's code into the repo
@@ -26,6 +27,8 @@
 // Target: --store and --theme, or SHOPIFY_STORE and THEME_ID. Set them in package.json's deploy script.
 import { execFileSync, spawnSync } from "node:child_process";
 import { clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
+import { stateAgeDays } from "./qa/page-list.mjs";
+import { THROTTLED_MESSAGE, throttled } from "./qa/pace.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -299,7 +302,7 @@ if (WITH_JSON) {
 // push; the theme is an unpublished preview (or a development store's live theme), so no customer has seen it. A FAIL here
 // means the preview is not ready to hand over, and the exit code says so.
 if (SKIP_WALKS) {
-  console.log("\nCarry-over, forms, SEO, accessibility, widths, visual and speed NOT CHECKED (--skip-walks). Run a full npm run deploy before any handover.");
+  console.log("\nCarry-over, forms, SEO, accessibility, widths, Safari, Firefox and phones, visual, live comparison, journeys and speed NOT CHECKED (--skip-walks). Run a full npm run deploy before any handover.");
   process.exit(0);
 }
 if (!DOMAIN) {
@@ -322,6 +325,16 @@ if (PRELAUNCH) {
   walkEnv.PRELAUNCH = "1";
   console.log(`\nThe walks run on the myshopify.com preview, because ${DOMAIN} is not on Shopify yet (it still serves the old site).`);
 }
+// The state pages (sold out, on sale, most variants, 404, cart...) the walks also open
+// (scripts/qa/page-list.mjs). Found from live when missing or a month old; could not look means the
+// walks run without them, and the QA pass says so.
+const notRun = PRELAUNCH ? ["live comparison", "journeys"] : [];
+const stateAge = stateAgeDays();
+if (!PRELAUNCH && (stateAge === null || stateAge > 30)) {
+  console.log("\nFinding sold-out, sale and other state pages on live (design/state-pages.json)");
+  const r = spawnSync(process.execPath, [join(ROOT, "scripts/qa/find-state-pages.mjs")], { cwd: ROOT, stdio: "inherit", env: { ...process.env, SHOP_DOMAIN: DOMAIN } });
+  if (r.status !== 0) notRun.push("sold-out, sale and other product state pages");
+}
 const failedWalks = [];
 let visualToLook = 0;
 for (const [label, script, env] of [
@@ -330,9 +343,18 @@ for (const [label, script, env] of [
   ["SEO", "scripts/qa/seo-walk.mjs", { PREVIEW_URL }],
   ["accessibility", "scripts/qa/a11y-walk.mjs", { PREVIEW_URL }],
   ["widths", "scripts/qa/widths-walk.mjs", { PREVIEW_URL }],
+  ["Safari, Firefox and phones", "scripts/qa/browsers-walk.mjs", { PREVIEW_URL }],
   ["visual", "scripts/qa/visual-walk.mjs", { PREVIEW_URL }],
+  // Live is the reference for these two. Before launch the live address still serves the old site,
+  // which is not a Shopify theme to compare with, so they are left out and the QA pass says so.
+  ...(PRELAUNCH ? [] : [
+    ["live comparison", "scripts/qa/live-compare-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl }],
+    ["journeys", "scripts/qa/journeys-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl }],
+  ]),
   ["speed", "scripts/qa/speed-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl, RUNS: process.env.RUNS || "3" }],
 ]) {
+  // A store limiting this computer: stop here rather than hammer it with the walks left
+  if (throttled()) { failedWalks.push(`${label} (not run: ${THROTTLED_MESSAGE})`); continue; }
   console.log(`\n${label} check on ${PREVIEW_URL}`);
   const r = spawnSync(process.execPath, [join(ROOT, script)], { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...walkEnv, ...env } });
   // the visual walk's 2 means pictures changed for a person to look at, not a broken build
@@ -349,6 +371,7 @@ if (process.env.SKIP_QA === "1") {
 }
 let commit = null;
 try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
-writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending() });
-console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, visual and speed all passed.`);
+writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun });
+console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, Safari, Firefox and phones, visual${PRELAUNCH ? "" : ", live comparison, journeys"} and speed all passed.`);
+if (notRun.length) console.log(`NOT CHECKED: ${notRun.join(", ")}${PRELAUNCH ? " (the live address still serves the old site)" : ""}. Say so in the handover.`);
 if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one; npm run approve asks them to confirm it.`);

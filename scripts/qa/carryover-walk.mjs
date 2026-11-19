@@ -35,6 +35,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
 import { execCli, isMain, slashes } from "../platform.mjs";
+import { pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const THEME_DIRS = ["layout", "sections", "snippets", "blocks", "templates", "config", "locales", "assets"];
@@ -375,7 +376,7 @@ let UNLOCK = "";
 async function get(url, cookie = "", tries = 4) {
   cookie = [UNLOCK, cookie].filter(Boolean).join("; ");
   for (let i = 0; i < tries; i++) {
-    const r = await fetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(cookie ? { cookie } : {}) } }).catch(() => null);
+    const r = await pacedFetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(cookie ? { cookie } : {}) } }).catch(() => null);
     if (r && r.status === 429) { await sleep(2000 * (i + 1)); continue; }
     if (!r || !r.ok) return null;
     // Landed on the storefront password page: not the page that was asked for, so not checked.
@@ -387,7 +388,7 @@ async function get(url, cookie = "", tries = 4) {
 // Shopify answers ?preview_theme_id with a redirect that sets a cookie, then serves the live theme
 // to any request without it. A preview page only counts once it is proved to be that theme.
 async function previewSession(base, theme) {
-  const first = await fetch(`${base}/?preview_theme_id=${theme}`, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(UNLOCK ? { cookie: UNLOCK } : {}) } }).catch(() => null);
+  const first = await pacedFetch(`${base}/?preview_theme_id=${theme}`, { redirect: "manual", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(UNLOCK ? { cookie: UNLOCK } : {}) } }).catch(() => null);
   const cookie = (first?.headers.getSetCookie?.() || []).map((c) => c.split(";")[0]).join("; ");
   const themeOf = (html) => (html.match(/"themeId":"?(\d+)|\btheme_id:\s*(\d+)|Shopify\.theme\s*=\s*\{[^}]*"id":(\d+)/) || []).slice(1).find(Boolean);
   return async (path) => {

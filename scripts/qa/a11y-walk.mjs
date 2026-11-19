@@ -21,6 +21,9 @@ import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { isMain } from "../platform.mjs";
 import { pageTypeOf, withPreview } from "./seo-walk.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASELINE = join(ROOT, "scripts", "qa", "a11y-baseline.json");
@@ -66,10 +69,8 @@ export function merge(a, b) {
 // ----------------------------------------------------------------------------------- the walk
 
 function pagesToCheck() {
-  if (process.env.A11Y_PAGES) return process.env.A11Y_PAGES.split(",").map((s) => s.trim()).filter(Boolean);
-  const file = join(ROOT, "design", "seo-pages.json");
-  const cfg = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {};
-  return cfg.pages || null;
+  if (!process.env.A11Y_PAGES && !existsSync(join(ROOT, "design", "seo-pages.json"))) return null;
+  return pageList("A11Y_PAGES");
 }
 
 async function main() {
@@ -107,8 +108,8 @@ async function main() {
     let summary = {};
     for (const [label, width, height] of WIDTHS) {
       await page.setViewport({ width, height });
-      const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
-      if (!res || res.error || res.status() >= 400) { notChecked.push(`${path} (${label}): ${res?.error || `returned ${res?.status?.()}`}`); summary = null; break; }
+      const res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+      if (!res || res.error || !statusOk(path, res.status())) { notChecked.push(`${path} (${label}): ${res?.error || `returned ${res?.status?.()}`}`); summary = null; break; }
       if (onPasswordPage(page.url())) { notChecked.push(`${path} (${label}): the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); summary = null; break; }
       await new Promise((ok) => setTimeout(ok, 1000)); // app widgets that render after load
       const violations = await page.evaluate(async (src, tags) => {
