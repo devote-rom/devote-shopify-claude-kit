@@ -90,14 +90,16 @@ export function rowsToRun(list = "", engines = ENGINES) {
 }
 
 /**
- * What Chrome is set to for a row's reference: the same size, touch and phone mode, Chrome's own
- * user agent and a device scale of 1. Rows of the same size share one reference load.
+ * What Chrome is set to for a row's reference: the same size, device scale, touch and phone mode,
+ * with Chrome's own user agent. The same device scale matters: srcset hands a 3x iPhone a bigger
+ * file than a 1x screen, and on one store a logo's rounded file size then read as squashed in
+ * WebKit only. Rows of the same size share one reference load.
  */
 export function referenceFor(row) {
   const s = SCREENS[row.screen];
   if (!s) throw new Error(`row ${row.id} has no screen`);
-  const ref = { width: s.width, height: s.height, dpr: 1, mobile: s.mobile, touch: s.touch };
-  return { ...ref, key: `${ref.width}x${ref.height}${ref.mobile ? " phone" : ""}${ref.touch ? " touch" : ""}` };
+  const ref = { width: s.width, height: s.height, dpr: s.dpr, mobile: s.mobile, touch: s.touch };
+  return { ...ref, key: `${ref.width}x${ref.height}@${ref.dpr}x${ref.mobile ? " phone" : ""}${ref.touch ? " touch" : ""}` };
 }
 
 /** "WebKit (Safari's engine) on iPhone 15", for every line the walk prints. */

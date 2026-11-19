@@ -111,11 +111,11 @@ test("the engine rows: WebKit at desktop, iPhone and iPad, Firefox at 1440 and 3
   assert.ok(SCREENS["Pixel 7"].touch && SCREENS["Pixel 7"].mobile && /Android/.test(SCREENS["Pixel 7"].ua));
 });
 
-test("rows of the same size share one Chrome reference, set to the row's size and phone mode", () => {
+test("rows of the same size share one Chrome reference, set to the row's size, device scale and phone mode", () => {
   const byId = Object.fromEntries(ENGINES.map((e) => [e.id, e]));
   assert.equal(referenceFor(byId["webkit-desktop"]).key, referenceFor(byId["firefox-desktop"]).key);
   const phone = referenceFor(byId["webkit-iphone"]);
-  assert.deepEqual([phone.width, phone.height, phone.mobile, phone.touch, phone.dpr], [393, 659, true, true, 1]);
+  assert.deepEqual([phone.width, phone.height, phone.mobile, phone.touch, phone.dpr], [393, 659, true, true, 3]);
   assert.notEqual(phone.key, referenceFor(byId["firefox-phone"]).key);
 });
 
