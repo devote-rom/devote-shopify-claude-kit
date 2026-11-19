@@ -39,7 +39,7 @@ test("journeys.json: a good file passes and fills in the defaults", () => {
   assert.deepEqual(v.journeys[0].at, ["desktop", "phone"]);
   assert.equal(v.journeys[0].submit, false);
   assert.equal(v.skip.drawer.length > 5, true);
-  assert.deepEqual(validateJourneys(undefined), { errors: [], journeys: [], skip: {}, selectors: {} });
+  assert.deepEqual(validateJourneys(undefined), { errors: [], journeys: [], skip: {}, selectors: {}, customers: [] });
 });
 
 test("journeys.json: every mistake is named, and nothing runs", () => {

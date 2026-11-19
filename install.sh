@@ -72,6 +72,8 @@ for f in "$KIT"/tests/*.test.mjs; do
     *) cp "$f" "tests/$(basename "$f")" ;;
   esac
 done
+# the pretend stores some tests start (customers.test.mjs logs in to one)
+[ -d "$KIT/tests/fixtures" ] && mkdir -p tests/fixtures && cp -R "$KIT/tests/fixtures/." tests/fixtures/
 [ -f design/seo-pages.json ] || cp "$KIT/seo-pages.json.example" design/seo-pages.json
 say "   DEVOTE-KIT.md, every script in scripts/ and scripts/qa/, the tests, design/seo-pages.json (fill in the brand and one URL per page type)"
 

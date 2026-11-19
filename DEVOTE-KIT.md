@@ -614,6 +614,48 @@ LIVE_URL='https://<domain>/' PREVIEW_URL='https://<domain>/?preview_theme_id=<id
 If the store answers 429 (too many requests), the walk waits and tries again, then says NOT
 CHECKED. Run it again a few minutes later; never read that as a pass.
 
+### Logged in as each customer type
+
+On a wholesale or trade store, customer tags (VIP, trade, a country) change prices, labels, what
+can be bought and what the cart allows. A QA tester found about 75 problems in a year that only
+showed when logged in as one of those customers. List each type under `"customers"` in
+`design/journeys.json` and the walk logs in as it on live and on the preview, each in its own
+browser session, then:
+
+1. Runs the product and cart journeys, and any journey of the brand's own marked
+   `"customers": true`, as that customer on both sites.
+2. Reads the price, compare-at price, price labels and whether it can be added to the cart on each
+   product page in `design/seo-pages.json` and `design/state-pages.json`. Any difference between
+   live and the preview for the same customer FAILS.
+3. Says how that customer's prices differ from a guest's on live. With
+   `"expect": { "priceDiffersFromGuest": true }`, live showing guest prices FAILS: the test account
+   is probably missing its tag, and every other check as that customer means nothing until it is
+   fixed.
+4. Clears the customer's cart and logs out on both sites. It never changes account details,
+   addresses or orders, never goes past the first checkout step and never places an order.
+
+Setting up a test customer, once per type:
+
+1. A person creates the customer on the store (Customers, Add customer) with the tag that type
+   uses, activates the account and sets its password. Ask the store owner first: it is their
+   store. Claude never creates a customer account, on any store.
+2. They save the email and password as a login item in 1Password, in a vault the team shares.
+3. In `design/journeys.json`, the customer's `"login"` and `"password"` are that item's secret
+   references (in 1Password, the field's menu, Copy Secret Reference), such as
+   `op://Shopify QA/Example VIP/password`. Copy `journeys.json.example` to start.
+
+The walk reads them at run time with the 1Password CLI (`op read`), so 1Password must be open and
+unlocked on the Mac. A plain email or password in the file is refused: the file is committed. In
+CI, set `JOURNEYS_<NAME>_LOGIN` and `JOURNEYS_<NAME>_PASSWORD` (`JOURNEYS_VIP_LOGIN`,
+`JOURNEYS_TRADE_AU_PASSWORD`) from the CI's own secret store; they win over the file and follow
+the same rule. The walk never prints, logs or saves a login or password, and hides them on the
+page before any picture.
+
+A customer is NOT CHECKED, never skipped, when `op` is missing or not signed in, a reference does
+not exist, the store refuses the login, or Shopify asks for a captcha. A store on Shopify's new
+customer accounts signs in with a code sent by email, so the walk says NOT CHECKED and does not
+try to get around it. `JOURNEYS_ONLY=customers npm run journeys` runs just the logged-in part.
+
 ## Lessons from real builds
 
 Each of these reached a client review once. They are here so they reach nobody else.

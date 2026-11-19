@@ -6,6 +6,15 @@
   "selectors": {
     "addToCart": "FILL-IN css of the add to cart button, only if the walk said NOT FOUND"
   },
+  "customers": [
+    {
+      "$comment": "Only for a store where customer tags change prices, labels or what can be bought. A person creates this test customer on the store with the tag (here VIP) and saves it in 1Password; Claude never creates accounts. Never put the email or password itself in this file.",
+      "name": "VIP",
+      "login": "op://FILL-IN vault/FILL-IN item/username",
+      "password": "op://FILL-IN vault/FILL-IN item/password",
+      "expect": { "priceDiffersFromGuest": true }
+    }
+  ],
   "journeys": [
     {
       "name": "Size guide opens",

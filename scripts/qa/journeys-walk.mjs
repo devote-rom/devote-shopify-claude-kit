@@ -47,6 +47,12 @@
 //   "submit" steps only run in a journey with "submit": true, and then the form really sends on the
 //   live site and the preview at both widths: point it at a test inbox or test list, never a real one.
 //   Selector roles: see STRATEGIES below.
+//   "customers": [ { "name": "VIP", "login": "op://<vault>/<item>/username", "password": "op://<vault>/<item>/password",
+//                    "expect": { "priceDiffersFromGuest": true } } ] logs each test customer in on live and the
+//   preview and runs the product and cart journeys, every journey with "customers": true, and a price check
+//   on each product page as that customer. Any difference between live and the preview FAILS. Logins are
+//   1Password references read with `op read`, or JOURNEYS_<NAME>_LOGIN and _PASSWORD in CI; a plain value
+//   in the file is refused. See scripts/qa/customers.mjs. JOURNEYS_ONLY=customers runs just that part.
 // JOURNEYS_TRY_JS='<script>' runs a script on every preview page before the theme's own, to prove the
 // walk catches a break (stop the add to cart click, hide the submenus) without deploying one.
 // JOURNEYS_ONLY=cart,checkout runs just those journeys.
@@ -54,6 +60,11 @@ import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, cookieHeader, onPasswordPage } from "./preview-session.mjs";
+import {
+  afterLogin, compareWithGuest, comparePrices, customerVerdict, loginKind, maskOnPage, NEW_ACCOUNTS, newAccountsAt,
+  readShownPrice, redact, resolveCredentials, validateCustomers,
+} from "./customers.mjs";
+import { pageList } from "./page-list.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { isMain } from "../platform.mjs";
 
@@ -164,9 +175,9 @@ export function stepLabel(s) {
 /** design/journeys.json, checked. { errors: [], journeys, skip, selectors }. Any error means nothing runs. */
 export function validateJourneys(cfg) {
   const errors = [];
-  if (cfg === undefined || cfg === null) return { errors, journeys: [], skip: {}, selectors: {} };
-  if (typeof cfg !== "object" || Array.isArray(cfg)) return { errors: ["design/journeys.json must be an object with journeys, skip or selectors"], journeys: [], skip: {}, selectors: {} };
-  for (const k of Object.keys(cfg)) if (!["journeys", "skip", "selectors", "$comment"].includes(k)) errors.push(`unknown key "${k}" (use journeys, skip or selectors)`);
+  if (cfg === undefined || cfg === null) return { errors, journeys: [], skip: {}, selectors: {}, customers: [] };
+  if (typeof cfg !== "object" || Array.isArray(cfg)) return { errors: ["design/journeys.json must be an object with journeys, skip, selectors or customers"], journeys: [], skip: {}, selectors: {}, customers: [] };
+  for (const k of Object.keys(cfg)) if (!["journeys", "skip", "selectors", "customers", "$comment"].includes(k)) errors.push(`unknown key "${k}" (use journeys, skip, selectors or customers)`);
   const skip = cfg.skip ?? {};
   if (typeof skip !== "object" || Array.isArray(skip)) errors.push("skip must be an object: { \"<built-in id>\": \"<reason>\" }");
   else for (const [id, why] of Object.entries(skip)) {
@@ -190,6 +201,7 @@ export function validateJourneys(cfg) {
     const at = j.at ?? "both";
     if (!["desktop", "phone", "both"].includes(at)) errors.push(`${where}: at must be desktop, phone or both`);
     if (j.submit !== undefined && typeof j.submit !== "boolean") errors.push(`${where}: submit must be true or false`);
+    if (j.customers !== undefined && typeof j.customers !== "boolean") errors.push(`${where}: customers must be true or false`);
     if (!Array.isArray(j.steps) || !j.steps.length) { errors.push(`${where}: needs a list of steps`); return; }
     const steps = j.steps.map((s, k) => {
       const p = parseStep(s);
@@ -197,9 +209,11 @@ export function validateJourneys(cfg) {
       else if (p.kind === "submit" && j.submit !== true) errors.push(`${where} step ${k + 1}: a submit step needs "submit": true on the journey, and a test inbox`);
       return p;
     });
-    journeys.push({ name: j.name, at: at === "both" ? ["desktop", "phone"] : [at], submit: j.submit === true, steps });
+    journeys.push({ name: j.name, at: at === "both" ? ["desktop", "phone"] : [at], submit: j.submit === true, customers: j.customers === true, steps });
   });
-  return { errors, journeys, skip: errors.length ? {} : skip, selectors: errors.length ? {} : selectors };
+  const c = validateCustomers(cfg.customers);
+  errors.push(...c.errors);
+  return { errors, journeys, skip: errors.length ? {} : skip, selectors: errors.length ? {} : selectors, customers: errors.length ? [] : c.customers };
 }
 
 /** A word to search for from a product title: the first real word of three letters or more. */
@@ -447,6 +461,8 @@ function makeCtx({ page, base, target, viewport, data, selectors }) {
       const rec = { name, status: r.status, detail: r.detail || "" };
       if (target === "preview" && ["fail", "notfound"].includes(r.status)) {
         rec.shot = join("parity", "journeys", `${slugOf(ctx.journey)}-${viewport}-${slugOf(name)}.png`);
+        // logged in as a test customer: their email or name may be on the page, and never goes into a picture
+        if (ctx.secrets?.length) await page.evaluate(maskOnPage, ctx.secrets).catch(() => {});
         await page.screenshot({ path: join(ROOT, rec.shot) }).catch(() => { rec.shot = undefined; });
       }
       ctx.steps.push(rec);
@@ -906,12 +922,14 @@ async function customJourney(ctx, j) {
 
 // --------------------------------------------------------------------------------- one run
 
-async function runOne({ browser, journey, target, base, viewport, data, selectors, tryJs }) {
-  const context = await browser.createBrowserContext();
+// session: a logged-in customer's own browser context, kept open between journeys ({ context, name, secrets })
+async function runOne({ browser, journey, target, base, viewport, data, selectors, tryJs, session }) {
+  const context = session?.context || await browser.createBrowserContext();
   const page = await context.newPage();
   const problems = [], blocked = [], requests = [];
   const ctx = makeCtx({ page, base, target, viewport, data, selectors });
-  ctx.journey = journey.name;
+  ctx.journey = session ? `${session.name} ${journey.name}` : journey.name;
+  ctx.secrets = session?.secrets || [];
   ctx.requests = requests;
   const host = base.hostname;
   try {
@@ -953,9 +971,212 @@ async function runOne({ browser, journey, target, base, viewport, data, selector
       if (!new URL(page.url()).hostname.endsWith(host)) await page.goto(ctx.url("/cart.js"), { timeout: 30000 }).catch(() => {});
       await ctx.clearCart();
     } catch {}
-    await context.close().catch(() => {});
+    if (session) await page.close().catch(() => {});
+    else await context.close().catch(() => {});
   }
   return { steps: ctx.steps, problems, blocked };
+}
+
+
+// ------------------------------------------------------------------------- logged-in customers
+//
+// Each customer in design/journeys.json "customers" is logged in on live and on the preview, each in
+// a browser context of its own (the preview's password cookie never reaches live, and two customers
+// never share a session). As that customer: the product and cart journeys, every journey marked
+// "customers": true, and the price, compare-at price, price labels and add to cart of each product
+// page in design/seo-pages.json and design/state-pages.json. Any difference between live and the
+// preview for the same customer FAILS. How the customer's prices differ from a guest's on live is
+// said as information; with "expect": { "priceDiffersFromGuest": true } guest prices on live FAIL.
+// Then the cart is cleared and the customer logged out on both sites. See scripts/qa/customers.mjs.
+
+async function plainPage({ browser, context, base, target }) {
+  const page = await context.newPage();
+  page.setDefaultTimeout(30000);
+  await page.emulate({ ...VIEWPORTS.desktop, userAgent: (await browser.userAgent()).replace("HeadlessChrome", "Chrome") });
+  await page.evaluateOnNewDocument(installHelpers);
+  if (target === "preview") await applyCookies(page, base.toString());
+  await page.setRequestInterception(true);
+  page.on("request", (r) => {
+    const url = r.url();
+    // analytics stay blocked, and a sign-in is never followed onto Shopify's own account pages
+    if (isTracking(url) || (url !== base.toString() && newAccountsAt(url, base.origin))) return r.abort("blockedbyclient").catch(() => {});
+    return r.continue().catch(() => {});
+  });
+  return page;
+}
+
+/** Logs a customer in with Shopify's classic /account/login form. { status: ok | new | error, detail } */
+async function logIn({ browser, context, base, target, creds }) {
+  const headers = { "user-agent": UA, ...(target === "preview" && cookieHeader() ? { cookie: cookieHeader() } : {}) };
+  const kind = await loginKind(withPreview("/account/login", base), { headers });
+  if (kind.kind === "new") return { status: "new", detail: NEW_ACCOUNTS };
+  if (kind.kind === "error") return { status: "error", detail: `NOT CHECKED: ${kind.detail}` };
+  const page = await plainPage({ browser, context, base, target });
+  try {
+    await page.goto(withPreview("/account/login", base), { waitUntil: "load", timeout: 60000 });
+    if (newAccountsAt(page.url(), base.origin)) return { status: "new", detail: NEW_ACCOUNTS };
+    if (onPasswordPage(page.url())) return { status: "error", detail: "NOT CHECKED: the store password page came back (set .storefront-password or STOREFRONT_PASSWORD)" };
+    const field = async (name) => (await page.$(`form[action*="/account/login"] input[name="customer[${name}]"]`)) || page.$(`input[name="customer[${name}]"]`);
+    const email = await field("email"), password = await field("password");
+    if (!email || !password) {
+      const toNew = await page.evaluate(() => !!document.querySelector('a[href*="shopify.com/"][href*="/account"], a[href*="/customer_authentication"]'));
+      return toNew ? { status: "new", detail: NEW_ACCOUNTS } : { status: "error", detail: "NOT CHECKED: no classic login form (customer[email] and customer[password]) on /account/login" };
+    }
+    await email.click({ clickCount: 3 }).catch(() => {}); await email.type(creds.login);
+    await password.click({ clickCount: 3 }).catch(() => {}); await password.type(creds.password);
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "load", timeout: 30000 }).catch(() => null),
+      password.evaluate((e) => (e.form.requestSubmit ? e.form.requestSubmit() : e.form.submit())),
+    ]);
+    let where = afterLogin(page.url(), base.origin);
+    if (where.status === "ok") {
+      await page.goto(withPreview("/account", base), { waitUntil: "load", timeout: 60000 });
+      where = afterLogin(page.url(), base.origin);
+    }
+    if (where.status === "new") return { status: "new", detail: NEW_ACCOUNTS };
+    return where.status === "ok" ? { status: "ok" } : { status: "error", detail: `NOT CHECKED: ${where.detail}` };
+  } catch (e) {
+    return { status: "error", detail: `NOT CHECKED: logging in stopped: ${e.message.split("\n")[0]}` };
+  } finally { await page.close().catch(() => {}); }
+}
+
+/** Empties the customer's cart (POST /cart/clear.js) and logs them out. { cleared, out } */
+async function logOut({ browser, context, base, target }) {
+  const page = await plainPage({ browser, context, base, target });
+  let cleared = false, out = false;
+  try {
+    await page.goto(withPreview("/cart.js", base), { timeout: 60000 }).catch(() => {});
+    cleared = await page.evaluate(() => fetch("/cart/clear.js", { method: "POST", credentials: "same-origin" }).then((r) => r.ok).then((ok) => ok && fetch("/cart.js", { credentials: "same-origin", cache: "no-store" }).then((r) => r.json()).then((j) => j.item_count === 0))).catch(() => false);
+    await page.goto(withPreview("/account/logout", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
+    await page.goto(withPreview("/account", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
+    out = /^\/account\/login/.test(new URL(page.url()).pathname);
+  } finally { await page.close().catch(() => {}); }
+  return { cleared, out };
+}
+
+/** The product pages to read prices on: design/seo-pages.json and design/state-pages.json, else the walk's own two. */
+export function pricePaths(pages = [], data = {}) {
+  const own = pages.map((p) => String(p).split("#")[0]).filter((p) => /^\/products\/[^/?]+/.test(p) && !/FILL-IN/.test(p));
+  const found = [data.variantProduct?.handle, data.buy?.handle].filter(Boolean).map((h) => `/products/${h}`);
+  return [...new Set(own.length ? own : found)].slice(0, 12);
+}
+
+async function readPrices({ browser, context, base, target, paths, selectors }) {
+  const page = await plainPage({ browser, context, base, target });
+  const out = {};
+  try {
+    for (const path of paths) {
+      try {
+        let res;
+        for (let t = 0; ; t++) {
+          res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 60000 });
+          if (res?.status() !== 429 || t === 2) break;
+          await sleep(Math.min(60, Number(res.headers()["retry-after"]) || 20) * 1000);
+        }
+        if (onPasswordPage(page.url())) { out[path] = { error: "the store password page came back" }; continue; }
+        if (!res || res.status() >= 400) { out[path] = { error: res?.status() === 429 ? "the store kept answering 429 (too many requests)" : `returned ${res?.status() ?? "nothing"}` }; continue; }
+        await page.waitForNetworkIdle({ idleTime: 500, timeout: 6000 }).catch(() => {});
+        out[path] = await page.evaluate(readShownPrice, strategiesFor("price", selectors), strategiesFor("addToCart", selectors));
+      } catch (e) { out[path] = { error: `would not load: ${e.message.split("\n")[0]}` }; }
+    }
+  } finally { await page.close().catch(() => {}); }
+  return out;
+}
+
+export async function runCustomers({ puppeteer, chrome, cfg, liveBase, previewBase, data, tryJs, only = [], liveComparable = true, log = console.log, resolve = resolveCredentials }) {
+  const count = { FAIL: 0, notchecked: 0, pass: 0, "live-too": 0, notfound: 0, none: 0, notreached: 0, problems: 0 };
+  if (!liveComparable) {
+    log("\nCustomers NOT CHECKED: the live site is not on Shopify yet, so there is no live login to compare with.");
+    count.notchecked += cfg.customers.length;
+    return count;
+  }
+  const narrow = only.filter((x) => x !== "customers");
+  const journeys = [
+    ...["product", "cart"].filter((id) => !cfg.skip[id]).map((id) => ({ id, ...BUILT_INS[id], submit: false })),
+    ...cfg.journeys.filter((j) => j.customers).map((j) => ({ ...j, id: null })),
+  ].filter((j) => !narrow.length || narrow.includes(j.id) || narrow.includes(j.name));
+  const paths = pricePaths(pageList(null, { root: ROOT }), data);
+  const launch = () => puppeteer.launch({ executablePath: chrome, headless: true, protocolTimeout: 120000 });
+  const browsers = { live: await launch(), preview: await launch() };
+  const bases = { live: liveBase, preview: previewBase };
+  try {
+    const guestContext = await browsers.live.createBrowserContext();
+    const guestPrices = await readPrices({ browser: browsers.live, context: guestContext, base: liveBase, target: "live", paths, selectors: cfg.selectors });
+    await guestContext.close().catch(() => {});
+    for (const c of cfg.customers) {
+      log(`\nCustomer ${c.name}, logged in on live and the preview`);
+      const creds = await resolve(c);
+      if (creds.error) { log(`  NOT CHECKED       ${c.name}: ${creds.error}`); count.notchecked++; continue; }
+      const secrets = [creds.login, creds.password];
+      const say = (line) => log(redact(line, secrets));
+      const sides = {};
+      await Promise.all(["live", "preview"].map(async (target) => {
+        const browser = browsers[target], base = bases[target];
+        const context = await browser.createBrowserContext();
+        const side = (sides[target] = { journeys: {}, prices: {}, login: null, logout: null });
+        try {
+          side.login = await logIn({ browser, context, base, target, creds });
+          if (side.login.status !== "ok") return;
+          for (const viewport of ["desktop", "phone"]) {
+            for (const j of journeys.filter((j) => j.at.includes(viewport))) {
+              const run = await runOne({ browser, journey: j, target, base, viewport, data, selectors: cfg.selectors, tryJs, session: { context, name: c.name, secrets } });
+              (side.journeys[j.name] ||= {})[viewport] = run;
+            }
+          }
+          side.prices = await readPrices({ browser, context, base, target, paths, selectors: cfg.selectors });
+        } catch (e) {
+          side.error = e.message.split("\n")[0];
+        } finally {
+          if (side.login?.status === "ok") side.logout = await logOut({ browser, context, base, target }).catch(() => ({ cleared: false, out: false }));
+          await context.close().catch(() => {});
+        }
+      }));
+      const { live, preview } = sides;
+      const failedLogin = ["live", "preview"].filter((t) => sides[t].login?.status !== "ok");
+      if (failedLogin.length) {
+        if (failedLogin.some((t) => sides[t].login?.status === "new")) say(`  ${NEW_ACCOUNTS}`);
+        else for (const t of failedLogin) say(`  NOT CHECKED       could not log in on ${t}: ${(sides[t].login?.detail || sides[t].error || "unknown").replace(/^NOT CHECKED: /, "")}`);
+        count.notchecked++;
+      } else {
+        const liveProblems = Object.values(live.journeys).flatMap((r) => Object.values(r).flatMap((v) => v.problems || []));
+        for (const j of journeys) for (const viewport of j.at) {
+          const l = live.journeys[j.name]?.[viewport], p = preview.journeys[j.name]?.[viewport];
+          if (!l && !p) continue;
+          say(`  ${j.name} as ${c.name} at ${viewport === "desktop" ? "1440px" : "390px (phone)"}`);
+          for (const row of compareJourney(l, p, { liveComparable: true })) {
+            count[row.outcome]++;
+            const why = row.outcome === "live-too" && row.liveDetail ? row.liveDetail : row.detail;
+            say(`    ${SAY[row.outcome].padEnd(17)} ${row.name}  (live ${STATUS[row.live] || "-"}, preview ${STATUS[row.preview] || "-"})${why ? `: ${why}` : ""}`);
+            if (row.shot && ["FAIL", "notfound"].includes(row.outcome)) say(`    ${"".padEnd(17)} look: ${row.shot}`);
+          }
+          for (const pr of newProblems(liveProblems, p?.problems || [], [liveBase.origin, previewBase.origin])) { count.problems++; say(`    ${"FAIL".padEnd(17)} new on the preview, never on live: ${pr}`); }
+        }
+        const priceRows = comparePrices(live.prices, preview.prices);
+        say(`  prices as ${c.name}, live against the preview`);
+        for (const r of priceRows) {
+          if (r.outcome === "pass") count.pass++;
+          say(`    ${(r.outcome === "pass" ? "ok" : r.outcome === "FAIL" ? "FAIL" : "NOT CHECKED").padEnd(17)} ${r.path}: ${r.detail}`);
+        }
+        const guestRows = compareWithGuest(live.prices, guestPrices, c.name);
+        say(`  ${c.name} against a guest on live (information)`);
+        for (const r of guestRows) say(`    ${"".padEnd(17)} ${r.path}: ${r.detail}`);
+        const v = customerVerdict({ priceRows, guestRows, expect: c.expect, name: c.name });
+        count.FAIL += v.fails.length;
+        count.notchecked += v.notChecked.length;
+        for (const f of v.fails.filter((f) => !f.includes("live and the preview differ"))) say(`    ${"FAIL".padEnd(17)} ${f}`);
+        for (const n of v.notChecked.filter((n) => !priceRows.some((r) => n.startsWith(`${r.path}:`)))) say(`    ${"NOT CHECKED".padEnd(17)} ${n}`);
+      }
+      for (const t of ["live", "preview"]) {
+        const o = sides[t].logout;
+        if (!o) continue;
+        if (o.cleared && o.out) say(`  ${t}: cart cleared and logged out`);
+        else { count.notchecked++; say(`  NOT CHECKED       ${t}: ${!o.cleared ? "could not confirm the cart was cleared" : ""}${!o.cleared && !o.out ? " and " : ""}${!o.out ? "could not confirm the log out" : ""}: check the test account by hand`); }
+      }
+    }
+  } finally {
+    await Promise.all(Object.values(browsers).map((b) => b.close().catch(() => {})));
+  }
+  return count;
 }
 
 // ------------------------------------------------------------------------------------ the walk
@@ -1068,6 +1289,10 @@ async function main() {
     }
   }
   if (blockedAll.size) console.log(`\nForm sends blocked (no "submit": true): ${[...blockedAll].slice(0, 5).join(", ")}`);
+  if (cfg.customers.length && (!only.length || only.includes("customers"))) {
+    const c = await runCustomers({ puppeteer, chrome, cfg, liveBase, previewBase, data, tryJs, only, liveComparable });
+    for (const k of Object.keys(count)) count[k] += c[k] || 0;
+  }
   const fails = count.FAIL + count.problems;
   console.log(`\n${fails} FAIL, ${count["live-too"]} fail on live too, ${count.notfound} NOT FOUND, ${count.notchecked} not checked, ${count.none} with nothing to check, ${count.pass} ok.`);
   if (count.notfound) console.log("NOT FOUND is never a pass: give the theme's selector in design/journeys.json, or skip that journey there with the reason.");
