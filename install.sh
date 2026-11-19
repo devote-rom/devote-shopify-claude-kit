@@ -144,8 +144,8 @@ fi
 
 # ------------------------------------------------------- walk dependencies
 say "4b. Installing what the design walk needs (headless Chrome driver)"
-npm install --save-dev --no-audit --no-fund puppeteer-core@23 chrome-launcher@1 axe-core@4 pngjs@7 pixelmatch@7 >/dev/null 2>&1 \
-  && say "   installed" || warn "   could not install; run: npm i -D puppeteer-core chrome-launcher axe-core pngjs pixelmatch"
+npm install --save-dev --no-audit --no-fund puppeteer-core@23 chrome-launcher@1 axe-core@4 pngjs@7 pixelmatch@7 playwright@1.64.0 >/dev/null 2>&1 \
+  && say "   installed" || warn "   could not install; run: npm i -D puppeteer-core chrome-launcher axe-core pngjs pixelmatch playwright@1.64.0"
 grep -q '^node_modules/' .gitignore 2>/dev/null || add_lines .gitignore 'node_modules/' '/parity/' '.deploy.lock/'
 grep -q 'visual-baseline' .gitignore 2>/dev/null || add_lines .gitignore '/design/visual-baseline/'
 grep -q '^.theme-incoming/' .gitignore 2>/dev/null || add_lines .gitignore '.theme-incoming/'
