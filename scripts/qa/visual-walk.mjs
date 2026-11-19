@@ -7,7 +7,8 @@
 // reviewer looks where they expect a change; this looks everywhere. (The client saw it first.)
 //
 //   PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run visual
-//   npm run visual -- --approve        after opening every marked picture and confirming each change was meant
+//   npm run visual -- --approve        a person only, after opening every marked picture (Claude never
+//                                      runs it: ship gate rule 6). npm run approve does the same for a release.
 //
 // Pages: design/seo-pages.json, or VISUAL_PAGES. Widths: 390, 768, 1024, 1440.
 // Approved screenshots live in design/visual-baseline/ (not committed: a machine with none says
@@ -26,6 +27,9 @@
 // VISUAL_TRY_CSS='<css>' adds CSS to every page before the shot, to prove the walk catches a change
 // (plant the bug, watch it fail, take it away) without deploying a broken theme.
 // A page that could not be loaded is NOT CHECKED and exits 1: it is never a pass.
+// Exit 2: everything loaded, and some pictures changed or have no baseline. Not a failure of the
+// build, but a person has to look: the list goes to parity/visual/pending.json, and npm run approve
+// asks the approver to confirm they looked before it makes them the baseline (scripts/qa-pass.mjs).
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -165,6 +169,7 @@ async function main() {
   // the walk reports changes the site does not have.
   const browsers = await Promise.all(Array.from({ length: 4 }, () => puppeteer.launch({ executablePath: chrome, headless: true, protocolTimeout: 120000 })));
   let changed = 0, missing = 0, unchecked = 0;
+  const pending = [];
   const skip = cfg.skip || [];
   const jobs = pagesToCheck().filter((p) => !skip.some((k) => p.startsWith(k))).flatMap((path) => WIDTHS.map((w) => ({ path, w })));
   if (skip.length) console.log(`left out by design/visual.json: ${skip.join(", ")}`);
@@ -209,7 +214,7 @@ async function main() {
       await page.screenshot({ path: cur, clip: { x: 0, y: 0, width: w, height: h }, captureBeyondViewport: true });
       const ref = join(BASE, `${name}.png`);
       if (approve) { copyFileSync(cur, ref); return `approved ${path} at ${w}px`; }
-      if (!existsSync(ref)) { missing++; return `NO BASELINE ${path} at ${w}px: look at parity/visual/${name}.png, then npm run visual -- --approve`; }
+      if (!existsSync(ref)) { missing++; pending.push(name); return `NO BASELINE ${path} at ${w}px: look at parity/visual/${name}.png, then npm run visual -- --approve`; }
       const a = PNG.sync.read(readFileSync(ref)), b = PNG.sync.read(readFileSync(cur));
       const W = Math.min(a.width, b.width), H = Math.min(a.height, b.height);
       const crop = (img) => { if (img.width === W && img.height === H) return img.data; const o = new PNG({ width: W, height: H }); PNG.bitblt(img, o, 0, 0, W, H, 0, 0); return o.data; };
@@ -230,7 +235,7 @@ async function main() {
       const found = bands(rows);
       const grew = b.height - a.height;
       if (!found.length && Math.abs(grew) <= 2) return `same ${path} at ${w}px`;
-      changed++;
+      changed++; pending.push(name);
       writeFileSync(join(OUT, `${name}.diff.png`), PNG.sync.write(diff));
       const where = found.slice(0, 6).map((x) => `y ${x.top}-${x.bottom}`).join(", ");
       return `CHANGED ${path} at ${w}px: ${found.length} area${found.length === 1 ? "" : "s"}${where ? ` (${where})` : ""}${grew ? `, page ${grew > 0 ? "taller" : "shorter"} by ${Math.abs(grew)}px` : ""}\n        look: parity/visual/${name}.diff.png (red = changed) beside parity/visual/${name}.png`;
@@ -247,7 +252,8 @@ async function main() {
   } finally { await Promise.all(browsers.map((b) => b.close())); }
   if (approve) { console.log("\nApproved. These are now what the next run compares against."); process.exit(unchecked ? 1 : 0); }
   console.log(`\n${changed} CHANGED, ${missing} with no baseline, ${unchecked} not checked. Open every marked picture: approve only when each change was meant (npm run visual -- --approve).`);
-  process.exit(changed || missing || unchecked ? 1 : 0);
+  writeFileSync(join(OUT, "pending.json"), JSON.stringify({ at: new Date().toISOString(), shots: pending.sort() }, null, 2) + "\n");
+  process.exit(unchecked ? 1 : changed || missing ? 2 : 0);
 }
 
 if (isMain(import.meta.url)) main();

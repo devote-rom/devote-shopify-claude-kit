@@ -21,6 +21,10 @@
 //   4. PUSH: git push must pass "npm run qa" first. A gate, not a block: pushing
 //      is Claude's to do, it just has to be green. Bypass: SKIP_QA=1.
 //
+//   6. CHECKS HOLD: Claude never accepts its own screenshots (npm run visual -- --approve, or
+//      copying into design/visual-baseline/) and never writes .qa-pass.json, the record that
+//      every check passed. Only a full deploy writes it; approve and release require it.
+//
 //   5. APPROVAL: only a person approves work for the live theme (npm run approve,
 //      run in their own terminal after checking the review link). Claude never runs
 //      it and never writes .release-approval.json. Also wired on Write and Edit.
@@ -283,6 +287,20 @@ export function writesApprovalFile(filePath) {
   return /(^|\/)\.release-approval\.json$/.test(String(filePath || ""));
 }
 
+// Rule 6: the checks hold. A visual baseline is what a person accepted; the QA pass is what a full
+// deploy proved. Claude making either would let unchecked work through approve and release.
+const VISUAL_APPROVE = /(?:npm\s+run\s+visual\b[^;&|]*--approve\b|visual-walk\.mjs\b[^;&|]*--approve\b)/;
+const BASELINE_WRITE = /(?:\b(?:cp|mv|rsync|ditto|install|ln|tee)\b[^;&|]*visual-baseline|>\s*\S*visual-baseline)/;
+const PASS_WRITE = /(?:\b(?:cp|mv|rsync|ditto|install|ln|tee|touch|sed\s+-i|perl\s+-p?i)\b[^;&|]*\.qa-pass\.json|>\s*\S*\.qa-pass\.json|writeFileSync[^;]*qa-pass|qa-pass\.mjs[^;&|]*writeQaPass)/;
+export function bypassesChecks(command) {
+  const c = executablePart(command);
+  return VISUAL_APPROVE.test(c) || BASELINE_WRITE.test(c) || PASS_WRITE.test(c);
+}
+export function writesCheckRecord(filePath) {
+  const f = String(filePath || "");
+  return /(^|\/)\.qa-pass\.json$/.test(f) || /(^|\/)design\/visual-baseline\//.test(f) || /(^|\/)parity\/visual\/pending\.json$/.test(f);
+}
+
 export function mergeTargets(command) {
   return [...command.matchAll(/gh\s+pr\s+merge\s+(?:[^\s;&|]*\s+)*?(\d+)\b/g)].map((m) => m[1]);
 }
@@ -344,6 +362,16 @@ function main() {
       "Claude never runs approve and never writes .release-approval.json.\n\n" +
       "Give them the review link and that command, and wait. Once they have approved, " +
       "npm run release is yours to run."
+    );
+  }
+  if (writesCheckRecord(filePath) || bypassesChecks(command)) {
+    deny(
+      "BLOCKED. Claude never accepts its own screenshots and never writes the QA pass. " +
+      "Changed pictures are approved by the person who approves the release (npm run approve " +
+      "lists them and asks for --pictures-checked), and .qa-pass.json is written only by a " +
+      "full npm run deploy with every check green.\n\n" +
+      "Run npm run deploy without --skip-walks or SKIP_QA, fix what fails, and give the person " +
+      "the review link and the list of changed pictures."
     );
   }
   if (!command) allow();

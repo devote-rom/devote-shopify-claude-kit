@@ -246,7 +246,7 @@ npm run widths                        # buttons, chevrons, header, photo gaps, s
 npm run visual                        # every page at four widths against the last approved screenshots
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
-npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link
+npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
 npm run release                       # approved code onto the live theme, same theme id
 ```
 
@@ -501,9 +501,15 @@ listed with where it is on the page, and `parity/visual/<page>@<width>.diff.png`
 1. Deploy. The visual walk runs and lists what changed.
 2. Open every `.diff.png` it names, beside the matching `.png`. For each one, say what changed
    and whether it was meant. A change you did not make is a bug: fix it before anything else.
-3. Only when every change was meant: `npm run visual -- --approve`.
-4. A machine with no baseline reports NO BASELINE and fails: look at every `parity/visual/*.png`
-   once, in full, then approve.
+3. A change you did not make is fixed and deployed again. Changes that were meant are not yours
+   to accept: the person who approves the release does that. Deploy lists the changed pictures
+   (`parity/visual/pending.json`) and `npm run approve` shows them to that person and needs
+   `--pictures-checked` before it makes them the new baseline. Name each changed picture and what
+   changed in your report, so they know where to look.
+4. A machine with no baseline lists every picture as new, the same way.
+
+Claude never runs `npm run visual -- --approve` and never copies into `design/visual-baseline/`
+(ship gate rule 6): a screenshot Claude accepted is one nobody looked at.
 
 Anything that changes between two loads of the same code goes in `design/visual.json`, so the
 walk stays quiet when nothing changed: `"mask"` blanks a selector on every page (a rotating
@@ -882,6 +888,10 @@ branch merges into main.
    only problems the build adds fail.
 5. **An approval.** `npm run approve`, `scripts/approve.mjs`, or writing
    `.release-approval.json`. No bypass: an approval means a person looked.
+6. **Accepting screenshots or faking a pass.** `npm run visual -- --approve`, copying into
+   `design/visual-baseline/`, or writing `.qa-pass.json`. No bypass. Only a full `npm run deploy`
+   (no `--skip-walks`, no `SKIP_QA`, every check green) writes the QA pass, and approve and
+   release both refuse without one for this exact code.
 
 ### Approve, then release
 
@@ -894,9 +904,11 @@ preview link").
 2. Give the person the review link, pointed at the page the work changed, and this to paste in
    their own terminal once they have checked it:
    `npm run approve -- --by "Their name"`. It refuses unless the preview shows this repo's code,
-   so nobody approves one thing and releases another.
+   so nobody approves one thing and releases another, and unless the last full deploy passed every
+   check on that code. If pictures changed, it lists them and they approve again with
+   `--pictures-checked` once they have opened each one.
 3. Once they say it is approved, `npm run release` is yours to run. It refuses if the code changed
-   since the approval or the reviews are not stamped. It pushes only the code that differs from
+   since the approval or its last full QA pass, or the reviews are not stamped. It pushes only the code that differs from
    live, plus templates live does not have yet. It never touches a template or settings file live
    already has, and it stops if live holds a file this repo has never seen, bringing that file
    into `.theme-incoming/` to merge. The live theme keeps its id.

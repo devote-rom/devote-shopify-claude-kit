@@ -24,7 +24,8 @@
 //   - theme matches the baseline: nobody has touched it since. Code is pushed; with
 //     --with-json, your changed editor files are pushed too, and the baseline moves on.
 // Target: --store and --theme, or SHOPIFY_STORE and THEME_ID. Set them in package.json's deploy script.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +35,7 @@ import { reviewLink } from "./approval.mjs";
 import { execCli, slashes, slashKeys, sleepSync } from "./platform.mjs";
 import { checkStore } from "./dev-store.mjs";
 import { servesShopify, unlock as unlockStorefront, walkTarget } from "./qa/preview-session.mjs";
-import { reviewStatus } from "./review-stamp.mjs";
+import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { CODE_GLOBS, classify, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -252,6 +253,9 @@ const ignore = readFileSync(join(ROOT, ".shopifyignore"), "utf8");
 for (const g of ["templates/*.json", "config/settings_data.json", "sections/*.json", "locales/*.json"]) {
   if (!ignore.includes(g)) { console.log(`.shopifyignore must list ${g}. Stopping before a push that could carry editor files.`); process.exit(1); }
 }
+// The theme is about to change, so any earlier QA pass no longer describes it (scripts/qa-pass.mjs).
+clearQaPass();
+const PUSHED_HASH = codeHash();
 pushChecked(["theme", "push", "--store", STORE, "--theme", THEME, "--nodelete"], { cwd: ROOT });
 console.log("Code pushed. Editor-owned files were not sent.");
 // Every deploy ends with the link a person opens to check the work (Marcel, 21 Oct 2026: "anytime
@@ -319,6 +323,7 @@ if (PRELAUNCH) {
   console.log(`\nThe walks run on the myshopify.com preview, because ${DOMAIN} is not on Shopify yet (it still serves the old site).`);
 }
 const failedWalks = [];
+let visualToLook = 0;
 for (const [label, script, env] of [
   ["carry-over", "scripts/qa/carryover-walk.mjs", { SHOPIFY_STORE: STORE, THEME_ID: THEME, SHOP_DOMAIN: DOMAIN, CARRYOVER_BASE: new URL(PREVIEW_URL).origin }],
   ["forms", "scripts/qa/forms-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl }],
@@ -329,11 +334,21 @@ for (const [label, script, env] of [
   ["speed", "scripts/qa/speed-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl, RUNS: process.env.RUNS || "3" }],
 ]) {
   console.log(`\n${label} check on ${PREVIEW_URL}`);
-  try { execFileSync(process.execPath, [join(ROOT, script)], { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...walkEnv, ...env } }); }
-  catch { failedWalks.push(label); }
+  const r = spawnSync(process.execPath, [join(ROOT, script)], { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...walkEnv, ...env } });
+  // the visual walk's 2 means pictures changed for a person to look at, not a broken build
+  if (label === "visual" && r.status === 2) { visualToLook = readVisualPending().length; continue; }
+  if (r.status !== 0) failedWalks.push(label);
 }
 if (failedWalks.length) {
   console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}, but ${failedWalks.join(" and ")} failed. Not ready to hand over: fix it, deploy again, then reflect (DEVOTE-KIT.md, "Reflect after every deploy").`);
   process.exit(1);
 }
+if (process.env.SKIP_QA === "1") {
+  console.log("\nPushed and the walks passed, but QA guards and tests were SKIPPED (SKIP_QA=1), so this is not a full pass: it cannot be approved or released. Deploy again without SKIP_QA.");
+  process.exit(1);
+}
+let commit = null;
+try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
+writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending() });
 console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, visual and speed all passed.`);
+if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one; npm run approve asks them to confirm it.`);
