@@ -28,6 +28,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
 import { stateAgeDays } from "./qa/page-list.mjs";
+import { THROTTLED_MESSAGE, throttled } from "./qa/pace.mjs";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -349,6 +350,8 @@ for (const [label, script, env] of [
   ]),
   ["speed", "scripts/qa/speed-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl, RUNS: process.env.RUNS || "3" }],
 ]) {
+  // A store limiting this computer: stop here rather than hammer it with the walks left
+  if (throttled()) { failedWalks.push(`${label} (not run: ${THROTTLED_MESSAGE})`); continue; }
   console.log(`\n${label} check on ${PREVIEW_URL}`);
   const r = spawnSync(process.execPath, [join(ROOT, script)], { cwd: ROOT, stdio: "inherit", env: { ...process.env, ...walkEnv, ...env } });
   // the visual walk's 2 means pictures changed for a person to look at, not a broken build

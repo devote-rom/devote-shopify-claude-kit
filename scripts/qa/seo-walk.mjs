@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, cookieHeader, mergeCookies, onPasswordPage } from "./preview-session.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -382,7 +383,7 @@ async function fetchFollow(url, headers, maxHops = 5) {
     let r;
     try {
       // the storefront password cookie, before launch (scripts/qa/preview-session.mjs)
-      r = await fetch(current, { redirect: "manual", headers: cookieHeader() ? { ...headers, cookie: mergeCookies(cookieHeader(), headers?.cookie) } : headers });
+      r = await pacedFetch(current, { redirect: "manual", headers: cookieHeader() ? { ...headers, cookie: mergeCookies(cookieHeader(), headers?.cookie) } : headers });
     } catch (e) {
       return { error: e.message };
     }
@@ -437,7 +438,7 @@ async function main() {
   const notChecked = [];
   async function visit(path) {
     const url = withPreview(path, base);
-    const res = await page.goto(url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+    const res = await pacedGoto(page, url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
     if (!res || res.error) return { error: res?.error || "no response" };
     if (onPasswordPage(page.url())) return { error: `the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)` };
     const served = /theme;desc="(\d+)"/.exec(res.headers()["server-timing"] || "")?.[1];
@@ -509,7 +510,7 @@ async function main() {
 
   // Site-wide
   const site = [];
-  const get = async (p) => { try { const r = await fetch(new URL(p, base.origin), cookieHeader() ? { headers: { cookie: cookieHeader() } } : undefined); return [r.status, await r.text()]; } catch (e) { notChecked.push(`${p}: ${e.message}`); return [0, ""]; } };
+  const get = async (p) => { try { const r = await pacedFetch(new URL(p, base.origin), cookieHeader() ? { headers: { cookie: cookieHeader() } } : undefined); return [r.status, await r.text()]; } catch (e) { notChecked.push(`${p}: ${e.message}`); return [0, ""]; } };
   site.push(...robotsTxtIssues(...(await get("/robots.txt")), { prelaunch: process.env.PRELAUNCH === "1" }), ...sitemapIssues(...(await get("/sitemap.xml"))));
 
   // Report

@@ -20,7 +20,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { isMain } from "../platform.mjs";
-import { pageTypeOf, withPreview } from "./seo-walk.mjs";import { pageList, statusOk } from "./page-list.mjs";
+import { pageTypeOf, withPreview } from "./seo-walk.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -106,7 +108,7 @@ async function main() {
     let summary = {};
     for (const [label, width, height] of WIDTHS) {
       await page.setViewport({ width, height });
-      const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+      const res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
       if (!res || res.error || !statusOk(path, res.status())) { notChecked.push(`${path} (${label}): ${res?.error || `returned ${res?.status?.()}`}`); summary = null; break; }
       if (onPasswordPage(page.url())) { notChecked.push(`${path} (${label}): the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); summary = null; break; }
       await new Promise((ok) => setTimeout(ok, 1000)); // app widgets that render after load

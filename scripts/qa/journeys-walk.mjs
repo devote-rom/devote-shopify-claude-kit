@@ -71,6 +71,7 @@ import {
 import { pageList } from "./page-list.mjs";
 import { withPreview } from "./seo-walk.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const OUT = join(ROOT, "parity", "journeys");
@@ -442,7 +443,7 @@ function makeCtx({ page, base, target, viewport, data, selectors }) {
     async goto(path) {
       let res;
       for (let t = 0; ; t++) {
-        res = await page.goto(ctx.url(path), { waitUntil: "load", timeout: 60000 }).catch((e) => ({ error: e.message }));
+        res = await pacedGoto(page, ctx.url(path), { waitUntil: "load", timeout: 60000 }).catch((e) => ({ error: e.message }));
         if (res?.error || res?.status() !== 429) break;
         // the store is slowing the walk down: wait as long as it asks, twice, then say so
         if (t === 2) throw Object.assign(new Error(`${path}: the store kept answering 429 (too many requests); run the walk again in a few minutes`), { notChecked: true });
@@ -477,7 +478,7 @@ function makeCtx({ page, base, target, viewport, data, selectors }) {
       const u = new URL(href, page.url());
       const once = () => (u.origin === new URL(page.url()).origin
         ? page.evaluate((h) => fetch(h, { credentials: "same-origin", headers: { accept: "text/html" } }).then((r) => r.status, () => 0), u.toString())
-        : fetch(u, { headers: { "user-agent": UA } }).then((r) => r.status, () => 0));
+        : pacedFetch(u, { headers: { "user-agent": UA } }).then((r) => r.status, () => 0));
       let status = await once();
       for (let t = 0; t < 2 && status === 429; t++) { await sleep(20000); status = await once(); }
       return status;
@@ -1039,7 +1040,7 @@ async function runOne({ browser, journey, target, base, viewport, data, selector
   } finally {
     // every cart the walk made is emptied, on the store's own domain
     try {
-      if (!new URL(page.url()).hostname.endsWith(host)) await page.goto(ctx.url("/cart.js"), { timeout: 30000 }).catch(() => {});
+      if (!new URL(page.url()).hostname.endsWith(host)) await pacedGoto(page, ctx.url("/cart.js"), { timeout: 30000 }).catch(() => {});
       await ctx.clearCart();
     } catch {}
     if (session) await page.close().catch(() => {});
@@ -1084,7 +1085,7 @@ async function logIn({ browser, context, base, target, creds }) {
   if (kind.kind === "error") return { status: "error", detail: `NOT CHECKED: ${kind.detail}` };
   const page = await plainPage({ browser, context, base, target });
   try {
-    await page.goto(withPreview("/account/login", base), { waitUntil: "load", timeout: 60000 });
+    await pacedGoto(page, withPreview("/account/login", base), { waitUntil: "load", timeout: 60000 });
     if (newAccountsAt(page.url(), base.origin)) return { status: "new", detail: NEW_ACCOUNTS };
     if (onPasswordPage(page.url())) return { status: "error", detail: "NOT CHECKED: the store password page came back (set .storefront-password or STOREFRONT_PASSWORD)" };
     const field = async (name) => (await page.$(`form[action*="/account/login"] input[name="customer[${name}]"]`)) || page.$(`input[name="customer[${name}]"]`);
@@ -1101,7 +1102,7 @@ async function logIn({ browser, context, base, target, creds }) {
     ]);
     let where = afterLogin(page.url(), base.origin);
     if (where.status === "ok") {
-      await page.goto(withPreview("/account", base), { waitUntil: "load", timeout: 60000 });
+      await pacedGoto(page, withPreview("/account", base), { waitUntil: "load", timeout: 60000 });
       where = afterLogin(page.url(), base.origin);
     }
     if (where.status === "new") return { status: "new", detail: NEW_ACCOUNTS };
@@ -1116,10 +1117,10 @@ async function logOut({ browser, context, base, target }) {
   const page = await plainPage({ browser, context, base, target });
   let cleared = false, out = false;
   try {
-    await page.goto(withPreview("/cart.js", base), { timeout: 60000 }).catch(() => {});
+    await pacedGoto(page, withPreview("/cart.js", base), { timeout: 60000 }).catch(() => {});
     cleared = await page.evaluate(() => fetch("/cart/clear.js", { method: "POST", credentials: "same-origin" }).then((r) => r.ok).then((ok) => ok && fetch("/cart.js", { credentials: "same-origin", cache: "no-store" }).then((r) => r.json()).then((j) => j.item_count === 0))).catch(() => false);
-    await page.goto(withPreview("/account/logout", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
-    await page.goto(withPreview("/account", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
+    await pacedGoto(page, withPreview("/account/logout", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
+    await pacedGoto(page, withPreview("/account", base), { waitUntil: "load", timeout: 60000 }).catch(() => {});
     out = /^\/account\/login/.test(new URL(page.url()).pathname);
   } finally { await page.close().catch(() => {}); }
   return { cleared, out };
@@ -1140,7 +1141,7 @@ async function readPrices({ browser, context, base, target, paths, selectors }) 
       try {
         let res;
         for (let t = 0; ; t++) {
-          res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 60000 });
+          res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 60000 });
           if (res?.status() !== 429 || t === 2) break;
           await sleep(Math.min(60, Number(res.headers()["retry-after"]) || 20) * 1000);
         }
@@ -1255,7 +1256,7 @@ export async function runCustomers({ puppeteer, chrome, cfg, liveBase, previewBa
 async function json(url, headers = {}) {
   let r;
   for (let t = 0; t < 3; t++) {
-    r = await fetch(url, { headers: { "user-agent": UA, ...headers } });
+    r = await pacedFetch(url, { headers: { "user-agent": UA, ...headers } });
     if (r.status !== 429) break;
     await sleep(Math.min(60, Number(r.headers.get("retry-after")) || 20) * 1000);
   }

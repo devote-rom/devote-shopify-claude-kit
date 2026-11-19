@@ -8,9 +8,10 @@ import { dirname } from "node:path";
 import { FIXED_STATE_PAGES, STATE_FILE, pickStatePages } from "./page-list.mjs";
 import { deployTarget } from "../approval.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedFetch } from "./pace.mjs";
 
 async function getJson(url) {
-  const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (devote-kit pages)" }, redirect: "follow" });
+  const r = await pacedFetch(url, { headers: { "user-agent": "Mozilla/5.0 (devote-kit pages)" }, redirect: "follow" });
   if (r.status === 429) throw new Error("Shopify is limiting requests from this computer (429); wait and run again");
   if (!r.ok) throw new Error(`${url} returned ${r.status}`);
   return r.json();

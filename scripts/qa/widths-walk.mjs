@@ -20,7 +20,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyCookies, onPasswordPage } from "./preview-session.mjs";
 import { withPreview } from "./seo-walk.mjs";
-import { isMain } from "../platform.mjs";import { pageList, statusOk } from "./page-list.mjs";
+import { isMain } from "../platform.mjs";
+import { pageList, statusOk } from "./page-list.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -30,7 +32,8 @@ export const WIDTHS = [320, 360, 390, 414, 480, 540, 600, 640, 700, 767, 768, 82
 export const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
 
 function pagesToCheck() {
-  return pageList(process.env.WIDTH_PAGES ? "WIDTH_PAGES" : "BUTTON_PAGES");
+  // one page per type only: 24 widths of every state page would be hundreds of loads (scripts/qa/pace.mjs)
+  return pageList(process.env.WIDTH_PAGES ? "WIDTH_PAGES" : "BUTTON_PAGES", { states: false });
 }
 
 // Runs in the page: labels of visible buttons whose text runs over more than one line or out of the box.
@@ -438,7 +441,7 @@ async function main() {
       const found = {};
       for (const w of WIDTHS) {
         await page.setViewport({ width: w, height: 900, deviceScaleFactor: 1 });
-        const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+        const res = await pacedGoto(page, withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
         if (res?.error || (res && res.status && !statusOk(path, res.status()))) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
         if (onPasswordPage(page.url())) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); continue; }
         for (const msg of await pageFindings((fn, ...args) => page.evaluate(fn, ...args), cfg)) (found[msg] ||= []).push(w);

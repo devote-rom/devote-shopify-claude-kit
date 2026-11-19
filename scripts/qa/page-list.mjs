@@ -11,7 +11,8 @@
 // runs it when the file is missing or more than 30 days old. Commit it, and edit it by hand when a
 // better example exists (each entry says why it is there).
 //
-// Walks that use this: visual, widths, accessibility and live comparison. The SEO walk keeps to
+// Walks that open the state pages: visual, accessibility and live comparison. Widths (24 widths) and
+// browsers (six engines) keep to one page per type, so a deploy stays within what Shopify allows. The SEO walk keeps to
 // seo-pages.json (the 404, cart and login pages are not for search engines).
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";

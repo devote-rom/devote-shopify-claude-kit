@@ -36,6 +36,7 @@ import { withPreview } from "./seo-walk.mjs";
 import { imagesDone, pagesToCheck, settle } from "./visual-walk.mjs";
 import { statusOk } from "./page-list.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 export const WIDTHS = [390, 1440];
@@ -285,7 +286,7 @@ async function load(browser, url, { cookies, masks, tryCss, width }) {
       if (["xhr", "fetch"].includes(r.resourceType()) && +u.searchParams.get("page") > 1) r.abort(); else r.continue();
     });
     if (cookies) await applyCookies(page, url);
-    const res = await page.goto(url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+    const res = await pacedGoto(page, url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
     if (res?.error || (res?.status && !statusOk(new URL(url).pathname, res.status()))) throw new Error(`${url} gave ${res.error || res.status()}`);
     if (onPasswordPage(page.url())) throw new Error(`${url}: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`);
     await page.mouse.move(-10, -10).catch(() => {});

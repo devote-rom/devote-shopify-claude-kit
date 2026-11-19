@@ -45,6 +45,8 @@ import { withPreview } from "./seo-walk.mjs";
 import { imagesDone, pagesToCheck, settle } from "./visual-walk.mjs";
 import { pageFindings, widthsConfig } from "./widths-walk.mjs";
 import { isMain } from "../platform.mjs";
+import { pacedGoto, pacedFetch } from "./pace.mjs";
+import { pageList } from "./page-list.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const OUT = join(ROOT, "parity", "browsers");
@@ -331,7 +333,7 @@ async function puppeteerLoad(browser, url, s, { emulate = true } = {}) {
     else await page.setViewport({ width: s.width, height: s.height });
     const cookies = cookiesFor(url);
     if (cookies.length) await page.setCookie(...cookies);
-    const res = await page.goto(url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+    const res = await pacedGoto(page, url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
     return {
       status: res?.status?.() ?? (res?.error ? 0 : 200), error: res?.error, url: page.url(),
       evaluate: runner(page),
@@ -372,7 +374,7 @@ export const DRIVERS = {
         const cookies = cookiesFor(url).map(({ domain, ...c }) => ({ ...c, url: new URL(url).origin }));
         if (cookies.length) await ctx.addCookies(cookies);
         const page = await ctx.newPage();
-        const res = await page.goto(url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
+        const res = await pacedGoto(page, url, { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
         return {
           status: res?.status?.() ?? (res?.error ? 0 : 200), error: res?.error, url: page.url(),
           evaluate: runner(page),
@@ -542,7 +544,8 @@ async function main() {
   const base = new URL(RAW);
   const cfg = widthsConfig();
   const gap = +(process.env.BROWSERS_PAUSE_MS ?? 3000);
-  const pages = pagesToCheck("BROWSERS_PAGES");
+  // one page per type only, to keep the number of loads down (scripts/qa/pace.mjs)
+  const pages = pageList("BROWSERS_PAGES", { states: false });
   const results = [];
   let chrome;
   try { chrome = await DRIVERS.chrome(); }
