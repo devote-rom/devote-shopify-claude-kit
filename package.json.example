@@ -15,6 +15,7 @@
     "release": "node scripts/release.mjs",
     "a11y": "node scripts/qa/a11y-walk.mjs",
     "widths": "node scripts/qa/widths-walk.mjs",
+    "browsers": "node scripts/qa/browsers-walk.mjs",
     "visual": "node scripts/qa/visual-walk.mjs",
     "live": "node scripts/qa/live-compare-walk.mjs",
     "journeys": "node scripts/qa/journeys-walk.mjs"
@@ -24,6 +25,7 @@
     "chrome-launcher": "^1",
     "axe-core": "^4",
     "pixelmatch": "^7",
-    "pngjs": "^7"
+    "pngjs": "^7",
+    "playwright": "1.64.0"
   }
 }

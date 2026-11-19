@@ -26,7 +26,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // Phones to large tablets as well as laptops: a hero photo sized for 390px left bands down both
 // sides from about 420px to 767px on one build, and no width between 390 and 768 was checked.
 export const WIDTHS = [320, 360, 390, 414, 480, 540, 600, 640, 700, 767, 768, 820, 900, 990, 1024, 1100, 1180, 1280, 1300, 1366, 1440, 1600, 1920, 2560];
-const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
+export const BUTTONS = '.button, .button-secondary, [class*="btn"]:is(a, button)';
 
 function pagesToCheck() {
   if ((process.env.WIDTH_PAGES || process.env.BUTTON_PAGES)) return (process.env.WIDTH_PAGES || process.env.BUTTON_PAGES).split(",").map((s) => s.trim()).filter(Boolean);
@@ -35,7 +35,7 @@ function pagesToCheck() {
 }
 
 // Runs in the page: labels of visible buttons whose text runs over more than one line or out of the box.
-function wrappedButtons(selector) {
+export function wrappedButtons(selector) {
   const st = document.createElement("style");
   st.textContent = "* { content-visibility: visible !important; }";
   document.head.appendChild(st);
@@ -167,7 +167,7 @@ export function uncoveredPhotos() {
 // Runs in the page: flex boxes whose words run together. Flex drops the spaces between a text run
 // and an inline element (a price from the money filter prints its own <span>), so "Around $530"
 // rendered as "AROUND$530". Measured on screen: a space in the source must leave a gap.
-function joinedWords() {
+export function joinedWords() {
   const st = document.createElement("style");
   st.textContent = "* { content-visibility: visible !important; }";
   document.head.appendChild(st);
@@ -396,6 +396,31 @@ export function cutOffCandidates(okSelectors) {
   return out;
 }
 
+/**
+ * Every in-page check above on the page as it is now, as plain-English findings (one per problem).
+ * evaluate(fn, ...args) runs fn in the page: puppeteer's page.evaluate, or the browsers walk's
+ * runner for WebKit and Firefox, so both walks check with this one copy. Note it opens hidden
+ * data-step form steps, so read anything else from the page first.
+ */
+export async function pageFindings(evaluate, cfg = {}) {
+  const found = [];
+  await evaluate(() => document.fonts.ready);
+  for (const label of new Set(await evaluate(wrappedButtons, BUTTONS))) found.push(`"${label}" wraps`);
+  for (const msg of await evaluate(headerClash)) found.push(msg);
+  for (const label of new Set(await evaluate(joinedWords))) found.push(`"${label}" has words run together`);
+  for (const name of new Set(await evaluate(squashedImages))) found.push(`picture squashed: ${name}`);
+  for (const msg of new Set(await evaluate(uncoveredPhotos))) found.push(`photo gap: ${msg.replace(/\d+px/g, "Npx")}`);
+  const { texts, pictures } = await evaluate(textBoxes, cfg.overlapOk || []);
+  for (const [a, b] of textOverlaps(texts)) found.push(`text overlaps text: "${a.s}" and "${b.s}"`);
+  const onPics = textOnPictures(texts, pictures);
+  const stray = new Set((await evaluate(designedOverlay, onPics.map(([t, p]) => [t.n, p.i]))).map((x) => x.join(",")));
+  for (const [t, p] of onPics) if (stray.has(`${t.n},${p.i}`)) found.push(`text sits on a picture: "${t.s}" on ${p.s}`);
+  for (const x of new Set(cutOff(await evaluate(cutOffCandidates, cfg.cutOffOk || [])).map((x) => x.s))) found.push(`text cut off: "${x}"`);
+  const wide = await evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  if (wide > 1) found.push("page scrolls sideways");
+  return [...new Set(found)];
+}
+
 async function main() {
   const RAW = process.env.PREVIEW_URL || process.argv.find((a) => a.startsWith("http"));
   if (!RAW) { console.log("Nothing checked. Give it the preview URL:\n  PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run widths"); process.exit(1); }
@@ -417,20 +442,7 @@ async function main() {
         const res = await page.goto(withPreview(path, base), { waitUntil: "load", timeout: 90000 }).catch((e) => ({ error: e.message }));
         if (res?.error || (res && res.status && res.status() >= 400)) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: ${res.error || res.status()}`); continue; }
         if (onPasswordPage(page.url())) { unchecked++; console.log(`NOT CHECKED ${path} at ${w}px: the store password page came back, not the page (set .storefront-password or STOREFRONT_PASSWORD)`); continue; }
-        await page.evaluate(() => document.fonts.ready);
-        for (const label of new Set(await page.evaluate(wrappedButtons, BUTTONS))) (found[`"${label}" wraps`] ||= []).push(w);
-        for (const msg of await page.evaluate(headerClash)) (found[msg] ||= []).push(w);
-        for (const label of new Set(await page.evaluate(joinedWords))) (found[`"${label}" has words run together`] ||= []).push(w);
-        for (const name of new Set(await page.evaluate(squashedImages))) (found[`picture squashed: ${name}`] ||= []).push(w);
-        for (const msg of new Set(await page.evaluate(uncoveredPhotos))) (found[`photo gap: ${msg.replace(/\d+px/g, "Npx")}`] ||= []).push(w);
-        const { texts, pictures } = await page.evaluate(textBoxes, cfg.overlapOk || []);
-        for (const [a, b] of textOverlaps(texts)) (found[`text overlaps text: "${a.s}" and "${b.s}"`] ||= []).push(w);
-        const onPics = textOnPictures(texts, pictures);
-        const stray = new Set((await page.evaluate(designedOverlay, onPics.map(([t, p]) => [t.n, p.i]))).map((x) => x.join(",")));
-        for (const [t, p] of onPics) if (stray.has(`${t.n},${p.i}`)) (found[`text sits on a picture: "${t.s}" on ${p.s}`] ||= []).push(w);
-        for (const x of new Set(cutOff(await page.evaluate(cutOffCandidates, cfg.cutOffOk || [])).map((x) => x.s))) (found[`text cut off: "${x}"`] ||= []).push(w);
-        const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-        if (wide > 1) (found["page scrolls sideways"] ||= []).push(w);
+        for (const msg of await pageFindings((fn, ...args) => page.evaluate(fn, ...args), cfg)) (found[msg] ||= []).push(w);
         if (process.env.WIDTH_SHOTS) {
           const { mkdirSync } = await import("node:fs");
           mkdirSync(process.env.WIDTH_SHOTS, { recursive: true });

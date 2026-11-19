@@ -243,6 +243,7 @@ npm run carryover                     # what the live theme does that the new bu
 npm run seo                           # on-page SEO on the preview, one page per type, before every handover
 npm run a11y                          # WCAG 2.2 AA (axe-core) on the preview, phone and desktop, before every handover
 npm run widths                        # buttons, chevrons, header, photo gaps, text overlaps and cut-off text, sideways scroll at 24 widths, 320px to 2560px
+npm run browsers                      # Safari's engine (desktop, iPhone, iPad), Firefox (1440px, 390px) and an Android phone, each against Chrome
 npm run visual                        # every page at four widths against the last approved screenshots
 npm run live                          # the preview against the live site: text, sections and type styles at 390px and 1440px
 npm run journeys                      # menus, phone drawer, search, filters, variants, cart and checkout clicked through, live vs preview
@@ -620,6 +621,35 @@ Each of these reached a client review once. They are here so they reach nobody e
   is the theme shortening a long title on purpose, so it only fails on a button or header menu
   link. Anything clipped or overlapping on purpose goes in `design/widths.json`:
   `{ "cutOffOk": ["selector"], "overlapOk": ["selector"] }`, with the reason in the brand's notes.
+- **Chrome is not the only browser.** Every other walk runs in headless Chrome, and over a year
+  a QA tester logged about 130 findings that only showed in Safari (desktop, iPhone, iPad), Firefox
+  or at Android sizes: a layout broken in Safari, a sticky header misbehaving, flex gaps, fonts,
+  buttons overflowing on an iPhone. `npm run browsers` loads every page in WebKit (the engine Safari
+  uses) at 1440px, as an iPhone 15 and as an iPad, in Firefox at 1440px and 390px, and in Chrome set
+  up as an Android phone (Pixel 7), and compares each with Chrome at the same size:
+
+  ```bash
+  PREVIEW_URL='https://<domain>/?preview_theme_id=<id>' npm run browsers
+  ```
+
+  It runs the widths walk's checks in each browser and fails what turns up there and not in
+  Chrome, then compares where the header, the main menu, every h1 and h2, every button and every
+  price sit. A box more than 8px out (14px on a 1440px screen) fails as "different in <browser>
+  at <size>", and so does text that runs out of its box in one browser only. Only the first box of
+  a shift is named, with "everything below it moves with it", and the allowance grows a little
+  over long stretches of text, because every browser draws fonts a pixel or two taller or shorter.
+  On one live store it found the footer's Quick Links heading sitting 30px below the other column
+  headings in Safari's engine, at desktop and iPad sizes. Pictures of both browsers, with the
+  differences outlined in red, go to `parity/browsers/`, and the full list to
+  `parity/browsers/report.md`. Look at both pictures for every difference before calling it real.
+  `BROWSERS_PAGES` and `BROWSERS_ENGINES` (`webkit`, `firefox`, or a row such as
+  `webkit-iphone`) narrow a run. It goes one page and one browser at a time, so it never hammers a
+  store; when Shopify answers 429 it waits 30 seconds, tries once more, then says NOT CHECKED:
+  "Shopify is limiting requests from this computer; wait and run again". It needs
+  `playwright@1.64.0` (its WebKit is build 2370). Never run `npx playwright install`: on macOS 27 it
+  hangs, and its clean-up deletes other projects' browsers. Firefox is downloaded once into
+  `~/.cache/devote-kit/browsers` and, on a Mac, started with a fresh profile every run. Real Safari
+  and the iOS Simulator are not in it yet.
 - **Look at every width yourself before a preview link goes to anyone.** The walk measures what it
   can name (a photo gap, a wrapped button, sideways scroll), not whether a layout looks right: on
   the same build a photo shrank into a corner under empty sky at tablet widths and passed every
