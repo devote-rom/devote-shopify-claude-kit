@@ -36,7 +36,11 @@ def execute(store, query, variables=None, mutation=False):
     start = text.find("{")
     if out.returncode != 0 or start < 0:
         raise RuntimeError(f"store execute failed: {out.stderr.strip()[:400] or text[:400]}")
-    return json.loads(text[start:])
+    result = json.loads(text[start:])
+    # Shopify CLI 5.0 wraps the GraphQL data as {"data": ..., "extensions": ...}; 4.x printed the data itself.
+    if isinstance(result, dict) and "data" in result and set(result) <= {"data", "extensions"}:
+        return result["data"] or {}
+    return result
 
 
 STAGED = """mutation($input: [StagedUploadInput!]!) { stagedUploadsCreate(input: $input) {

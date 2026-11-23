@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execCli, haveCli, repoPath, slashKeys } from "../platform.mjs";
+import { themeCheckFiles } from "../shopify-json.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SKIP = new Set(["run-all.mjs", "ship-gate.mjs"]);
@@ -34,19 +35,14 @@ if (!haveCli("shopify")) {
   } catch (e) {
     out = (e.stdout || "").toString();
   }
-  let results = null;
-  try { results = JSON.parse(out.slice(out.indexOf("["))); } catch { results = null; }
-  if (!Array.isArray(results)) {
+  const results = themeCheckFiles(out);
+  if (!results) {
     failed.push("theme check");
     console.log("  FAIL theme check (could not read its JSON output, so nothing was checked)");
   } else {
     const ROOT = join(HERE, "..", "..");
     const counts = {};
-    for (const f of results) {
-      const rel = repoPath(ROOT, f.path);
-      const n = f.offenses.filter((o) => o.severity === 0 || o.severity === "error").length;
-      if (n) counts[rel] = n;
-    }
+    for (const f of results) if (f.errors) counts[repoPath(ROOT, f.path)] = f.errors;
     if (process.argv.includes("--write-baseline")) {
       writeFileSync(BASE, JSON.stringify(counts, null, 2) + "\n");
       console.log(`  wrote ${BASE}`);

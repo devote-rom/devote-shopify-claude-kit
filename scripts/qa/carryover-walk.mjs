@@ -35,6 +35,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
 import { execCli, isMain, slashes } from "../platform.mjs";
+import { executeData, themeList } from "../shopify-json.mjs";
 import { pacedFetch } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -417,7 +418,11 @@ async function main() {
   // 1. The before theme: the live one unless --from names another.
   let before = arg("--from");
   if (!before) {
-    try { before = String(JSON.parse(shopify(["theme", "list", "--store", store, "--role", "live", "--json"]))[0]?.id || ""); }
+    try {
+      const themes = themeList(shopify(["theme", "list", "--store", store, "--role", "live", "--json"]));
+      if (!themes) throw new Error("the Shopify CLI printed a theme list this kit cannot read");
+      before = themes[0]?.id || "";
+    }
     catch (e) { console.log(`NOT CHECKED: could not read which theme is live on ${store} (${String(e.message).split("\n")[0]}).`); process.exit(1); }
   }
   if (!before) { console.log(`NOT CHECKED: Shopify listed no live theme on ${store}.`); process.exit(1); }
@@ -461,7 +466,7 @@ async function main() {
     for (let i = 0; i < 60 && usage; i++) {
       const q = `{ ${field}(first: 250${after ? `, after: ${JSON.stringify(after)}` : ""}) { pageInfo { hasNextPage endCursor } nodes { templateSuffix } } }`;
       let data = null;
-      try { const out = shopify(["store", "execute", "--store", store, "--query", q]); data = JSON.parse(out.slice(out.indexOf("{")))[field] || JSON.parse(out.slice(out.indexOf("{"))).data?.[field]; } catch { data = null; }
+      try { data = executeData(shopify(["store", "execute", "--store", store, "--json", "--query", q]))?.[field] || null; } catch { data = null; }
       if (!data) { usage = null; break; }
       for (const n of data.nodes) if (n.templateSuffix) usage[`${type}.${n.templateSuffix}`] = (usage[`${type}.${n.templateSuffix}`] || 0) + 1;
       if (!data.pageInfo.hasNextPage) break;
