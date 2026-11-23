@@ -195,7 +195,9 @@ A deploy that passed first time with no corrections needs no reflection.
 `npm run deploy` refuses to push theme code that /code-review and /security-review have not
 seen. After changing any section, snippet, block, layout, asset, locale or the settings schema:
 
-1. Run `/code-review` on the changes, then `/security-review`. Fix what they find.
+1. Run `npm run review:base`, then `/code-review` on the changes, then `/security-review`. Fix
+   what they find. review:base points `origin/HEAD` at the last reviewed commit when the folder
+   has no GitHub remote; without it `/security-review` stops with "unknown revision origin/HEAD".
 2. Save each review's findings, and what you fixed, to `reviews/<date>-code-review.md` and
    `reviews/<date>-security-review.md`.
 3. `npm run review:stamp -- --code reviews/<file> --security reviews/<file>`, then deploy.

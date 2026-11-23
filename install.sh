@@ -170,8 +170,24 @@ fi
 
 # ------------------------------------------------------- walk dependencies
 say "4b. Installing what the design walk needs (headless Chrome driver)"
-npm install --save-dev --no-audit --no-fund puppeteer-core@23 chrome-launcher@1 axe-core@4 pngjs@7 pixelmatch@7 playwright@1.64.0 >/dev/null 2>&1 \
-  && say "   installed" || warn "   could not install; run: npm i -D puppeteer-core chrome-launcher axe-core pngjs pixelmatch playwright@1.64.0"
+# A cache in ~/.npm holding files owned by root (left by an old install run as admin) fails every
+# install with EACCES (one Mac, Nov 2026). One retry with a fresh cache gets past it, and the fix
+# for good is printed: moving the old cache aside needs no admin rights, and npm makes a new one.
+WALK_DEPS="puppeteer-core@23 chrome-launcher@1 axe-core@4 pngjs@7 pixelmatch@7 playwright@1.64.0"
+NPM_LOG="$(mktemp)"
+if npm install --save-dev --no-audit --no-fund $WALK_DEPS >"$NPM_LOG" 2>&1; then
+  say "   installed"
+elif grep -q "EACCES" "$NPM_LOG" && FRESH_CACHE="$(mktemp -d)" \
+  && npm install --save-dev --no-audit --no-fund --cache "$FRESH_CACHE" $WALK_DEPS >/dev/null 2>&1; then
+  say "   installed (with a fresh download cache, because npm's own cache folder is not yours)"
+  warn "   To fix npm's cache for good, run this once in Terminal:"
+  warn "     mv ~/.npm ~/.npm-old"
+  rm -rf "$FRESH_CACHE"
+else
+  warn "   could not install; run: npm i -D $WALK_DEPS"
+  grep -m 3 "ERR!" "$NPM_LOG" | sed 's/^/     /' >&2
+fi
+rm -f "$NPM_LOG"
 # Safari's engine (WebKit) for the browsers walk. Only WebKit, and PLAYWRIGHT_SKIP_BROWSER_GC so the
 # install never deletes browsers other projects on this machine use from the shared cache.
 if node -e 'const {webkit}=require("playwright");process.exit(require("fs").existsSync(webkit.executablePath())?0:1)' 2>/dev/null; then
@@ -195,12 +211,21 @@ grep -q '^design/' .shopifyignore 2>/dev/null || add_lines .shopifyignore 'node_
 
 # -------------------------------------------------------------------- plugin
 say "5. Installing the Shopify plugin for Claude"
-if command -v claude >/dev/null 2>&1; then
-  claude plugin install shopify-ai-toolkit@claude-plugins-official --scope project --yes \
+# The Claude desktop app does not put `claude` on PATH, so this also looks for the copy it keeps
+# for itself (one Mac, Nov 2026, skipped the plugin with "not on your PATH").
+find_claude() {
+  command -v claude 2>/dev/null && return 0
+  for c in "$HOME/.local/bin/claude" "$HOME/.claude/local/claude"; do
+    [ -x "$c" ] && { printf '%s\n' "$c"; return 0; }
+  done
+  ls -td "$HOME/Library/Application Support/Claude/claude-code"/*/*/claude.app/Contents/MacOS/claude 2>/dev/null | head -n 1 | grep .
+}
+if CLAUDE_BIN="$(find_claude)"; then
+  "$CLAUDE_BIN" plugin install shopify-ai-toolkit@claude-plugins-official --scope project --yes \
     && say "   installed" \
-    || warn "   could not install it. Open Claude Code and run: /plugin"
+    || warn "   could not install it. In Claude Code, run: /plugin install shopify-ai-toolkit@claude-plugins-official"
 else
-  warn "   the claude command is not on your PATH. Skipping the plugin."
+  warn "   could not find Claude Code on this computer. In Claude Code, run: /plugin install shopify-ai-toolkit@claude-plugins-official"
 fi
 
 # ------------------------------------------------------------------ git hook

@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { APPROVAL, ROOT, approvalVerdict, deployTarget, inGitHistory, readApproval, reviewLink, unknownLiveChanges } from "./approval.mjs";
 import { execCli, sleepSync } from "./platform.mjs";
+import { pushResult, themeList } from "./shopify-json.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
@@ -54,7 +55,11 @@ if (!qa.ok) { console.log(`Not releasing: ${qa.why}.`); process.exit(1); }
 
 // 2. Which theme is live. Could not check means stop.
 let live;
-try { live = JSON.parse(run(["theme", "list", "--store", STORE, "--role", "live", "--json"]))[0]; }
+try {
+  const themes = themeList(run(["theme", "list", "--store", STORE, "--role", "live", "--json"]));
+  if (!themes) throw new Error("the Shopify CLI printed a theme list this kit cannot read");
+  live = themes[0];
+}
 catch (e) { console.log(`Could not read which theme is live on ${STORE}. Stopping. (${String(e.message).split("\n")[0]})`); process.exit(1); }
 if (!live?.id) { console.log(`Shopify listed no live theme on ${STORE}. Stopping.`); process.exit(1); }
 const LIVE = String(live.id);
@@ -98,11 +103,11 @@ if (!files.length) { console.log("The live theme already has this code. Nothing 
 const stage = mkdtempSync(join(tmpdir(), "release-push-"));
 for (const f of files) { mkdirSync(dirname(join(stage, f)), { recursive: true }); cpSync(join(ROOT, f), join(stage, f)); }
 const out = run(["theme", "push", "--store", STORE, "--theme", LIVE, "--path", stage, "--nodelete", "--allow-live", "--json"], { stdio: ["ignore", "pipe", "inherit"] });
-let result = null;
-try { result = JSON.parse(out.slice(out.lastIndexOf('{"theme"'))); } catch {}
+const result = pushResult(out, stage);
 if (!result) { console.log("Could not read the push result, so it is not known what reached the live theme. Check it now. Stopping."); process.exit(1); }
-const errors = result.theme?.errors;
-if (errors && Object.keys(errors).length) {
+if (result.skipped) { console.log(`Shopify pushed nothing to the live theme (${result.skipped}). Stopping.`); process.exit(1); }
+const errors = result.errors;
+if (Object.keys(errors).length) {
   console.log("Shopify rejected these files; the live theme still has the old copies:");
   for (const [f, msgs] of Object.entries(errors)) console.log(`  ${f}: ${[].concat(msgs).join("; ")}`);
   process.exit(1);

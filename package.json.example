@@ -10,6 +10,7 @@
     "forms": "node scripts/qa/forms-walk.mjs",
     "carryover": "node scripts/qa/carryover-walk.mjs",
     "deploy": "node scripts/deploy.mjs --store FILL-IN.myshopify.com --theme FILL-IN-PREVIEW-THEME-ID --domain FILL-IN-www.store-domain.com.au",
+    "review:base": "node scripts/review-base.mjs",
     "review:stamp": "node scripts/review-stamp.mjs",
     "approve": "node scripts/approve.mjs",
     "release": "node scripts/release.mjs",

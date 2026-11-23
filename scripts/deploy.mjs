@@ -30,6 +30,7 @@ import { clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
 import { stateAgeDays } from "./qa/page-list.mjs";
 import { THROTTLED_MESSAGE, throttled } from "./qa/pace.mjs";
 import { createHash } from "node:crypto";
+import { pushResult, themeList } from "./shopify-json.mjs";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -81,12 +82,12 @@ const run = (args, opts = {}) => execCli("shopify", args, { stdio: ["ignore", "p
 // deploy said "Code pushed"). Push with --json and stop on any rejected file.
 function pushChecked(args, opts = {}) {
   const out = run([...args, "--json"], { ...opts, stdio: ["ignore", "pipe", "inherit"] });
-  const at = out.lastIndexOf('{"theme"');
-  let result = null;
-  try { result = JSON.parse(out.slice(at)); } catch { result = null; }
-  if (at < 0 || !result) { console.log("Could not read the push result, so it is not known what uploaded. Stopping."); process.exit(1); }
-  const errors = result.theme && result.theme.errors;
-  if (errors && Object.keys(errors).length) {
+  const at = args.indexOf("--path");
+  const result = pushResult(out, at >= 0 ? args[at + 1] : opts.cwd);
+  if (!result) { console.log("Could not read the push result, so it is not known what uploaded. Stopping."); process.exit(1); }
+  if (result.skipped) { console.log(`Shopify pushed nothing (${result.skipped}). Stopping.`); process.exit(1); }
+  const errors = result.errors;
+  if (Object.keys(errors).length) {
     console.log("Shopify rejected these files; the theme still has the old copies:");
     for (const [f, msgs] of Object.entries(errors)) console.log(`  ${f}: ${[].concat(msgs).join("; ")}`);
     process.exit(1);
@@ -115,7 +116,11 @@ function list(dir) {
 // on any store"). Before this, a live theme id in package.json would have been pushed to like any
 // preview. Could not check means stop: an unknown theme is not a preview.
 let liveIds;
-try { liveIds = JSON.parse(run(["theme", "list", "--store", STORE, "--role", "live", "--json"])).map((t) => String(t.id)); }
+try {
+  const themes = themeList(run(["theme", "list", "--store", STORE, "--role", "live", "--json"]));
+  if (!themes) throw new Error("the Shopify CLI printed a theme list this kit cannot read");
+  liveIds = themes.map((t) => t.id);
+}
 catch (e) { console.log(`Could not read which theme is live on ${STORE}, so this might be it. Stopping. (${String(e.message).split("\n")[0]})`); process.exit(1); }
 if (!liveIds.length) { console.log(`Shopify listed no live theme on ${STORE}, so it is not known whether ${THEME} is live. Stopping.`); process.exit(1); }
 const TARGET_IS_LIVE = liveIds.includes(String(THEME));
@@ -234,7 +239,7 @@ if (PULL_ONLY || editedInEditor.length) {
 const review = reviewStatus();
 if (!review.ok) {
   console.log(`Not deploying: ${review.why}.`);
-  console.log("Run /code-review and /security-review on the changes, fix what they find, save both reports under reviews/, then:");
+  console.log("Run npm run review:base, then /code-review and /security-review on the changes, fix what they find, save both reports under reviews/, then:");
   console.log("  npm run review:stamp -- --code reviews/<report>.md --security reviews/<report>.md");
   process.exit(1);
 }
