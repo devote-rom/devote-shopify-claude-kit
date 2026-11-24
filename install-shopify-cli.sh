@@ -28,6 +28,10 @@ use_user_prefix() {
   export PATH
 }
 
+# The CLI's major version the kit's scripts read (scripts/shopify-json.mjs). @latest put CLI 5.0 on a
+# new Mac on 23 Nov 2026 before the kit could read its output, and deploy stopped. Raise this only
+# once the kit passes on the new major; the weekly check in .github/workflows says when one is out.
+CLI_MAJOR=5
 GLOBAL="$(npm prefix -g)"
 SWITCHED=
 if [ ! -w "$GLOBAL/lib" ] || { [ -d "$GLOBAL/lib/node_modules" ] && [ ! -w "$GLOBAL/lib/node_modules" ]; }; then
@@ -37,13 +41,13 @@ fi
 
 # The check above can miss (a folder that looks writable but is not, 22 Oct 2026), so a failed
 # install into the global folder gets one retry in the person's own folder.
-if ! npm install -g --no-audit --no-fund @shopify/cli@latest; then
+if ! npm install -g --no-audit --no-fund @shopify/cli@"$CLI_MAJOR"; then
   if [ -n "$SWITCHED" ]; then
     warn "Installing the Shopify CLI failed. Send the output above to Marcel."
     exit 1
   fi
   use_user_prefix
-  if ! npm install -g --no-audit --no-fund @shopify/cli@latest; then
+  if ! npm install -g --no-audit --no-fund @shopify/cli@"$CLI_MAJOR"; then
     warn "Installing the Shopify CLI failed. Send the output above to Marcel."
     exit 1
   fi

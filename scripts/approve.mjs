@@ -11,15 +11,14 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APPROVAL, ROOT, deployTarget, reviewLink } from "./approval.mjs";
-import { execCli } from "./platform.mjs";
+import { execCli, flag } from "./platform.mjs";
 import { codeHash } from "./review-stamp.mjs";
 import { acceptVisual, qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
 const fileExists = (p) => existsSync(join(ROOT, p));
 
-const i = process.argv.indexOf("--by");
-const by = i > -1 ? (process.argv[i + 1] || "").trim() : "";
+const by = (flag("--by") || "").trim();
 if (!by) { console.log('Say who is approving: npm run approve -- --by "Your name"'); process.exit(1); }
 
 const target = deployTarget();

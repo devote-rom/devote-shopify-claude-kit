@@ -14,7 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isMain, slashes } from "./platform.mjs";
+import { flag, isMain, slashes } from "./platform.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 export const STAMP = join(ROOT, ".review-stamp.json");
@@ -58,7 +58,7 @@ export function reviewStatus() {
 
 // CLI: stamp after both reviews
 if (isMain(import.meta.url)) {
-  const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
+  const arg = (n) => flag(n);
   const code = arg("--code"), security = arg("--security");
   const problems = [];
   const newest = Math.max(...codeFiles().map((p) => statSync(p).mtimeMs));

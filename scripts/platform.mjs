@@ -82,6 +82,18 @@ export function isMain(metaUrl, argv1 = process.argv[1], platform = process.plat
 // written by a Windows deploy matched nothing on a Mac and the other way round, and theme check's
 // "d:\..." paths never started with ROOT's "D:\...", so its baseline kept absolute paths. The
 // win32 relative() compares drive letters and folders without case.
+/**
+ * A command-line flag's value. The last copy wins: `npm run deploy -- --theme X` adds a second
+ * --theme after the one package.json's script already passes, and the person typing means theirs.
+ * 20 Nov 2026: the first copy won, and a release meant for one theme was deployed to another.
+ */
+export function flag(name, argv = process.argv) {
+  const i = argv.lastIndexOf(name);
+  return i > -1 && i + 1 < argv.length ? argv[i + 1] : null;
+}
+/** Every different value a flag was given, so a script can say which one it used. */
+export const flagValues = (name, argv = process.argv) => [...new Set(argv.flatMap((a, i) => (a === name && i + 1 < argv.length ? [argv[i + 1]] : [])))];
+
 export const slashes = (p) => String(p).replace(/\\/g, "/");
 export function repoPath(root, p, platform = process.platform) {
   const api = platform === "win32" ? win32 : posix;
