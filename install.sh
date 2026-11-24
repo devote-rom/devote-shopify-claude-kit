@@ -85,6 +85,12 @@ for f in $RETIRED; do
     mv "$f" "$f.before-devote-kit"
     say "   retired $f, which the kit no longer uses (kept as $f.before-devote-kit)"
   fi
+  # Its test goes with it, or npm test fails on the missing import (20 Nov 2026, on two brands).
+  t="tests/$(basename "$f" .mjs).test.mjs"
+  if [ -f "$t" ]; then
+    mv "$t" "$t.before-devote-kit"
+    say "   retired $t with it (kept as $t.before-devote-kit)"
+  fi
 done
 say "   DEVOTE-KIT.md, every script in scripts/ and scripts/qa/, the tests, design/seo-pages.json (fill in the brand and one URL per page type)"
 

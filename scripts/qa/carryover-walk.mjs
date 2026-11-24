@@ -34,7 +34,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
-import { execCli, isMain, slashes } from "../platform.mjs";
+import { execCli, flag, isMain, slashes } from "../platform.mjs";
 import { executeData, themeList } from "../shopify-json.mjs";
 import { pacedFetch, THROTTLED_MESSAGE } from "./pace.mjs";
 
@@ -411,7 +411,7 @@ function target() {
 }
 
 async function main() {
-  const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
+  const arg = (n) => flag(n);
   const t = target();
   const store = arg("--store") || process.env.SHOPIFY_STORE || t.store;
   const preview = arg("--theme") || process.env.THEME_ID || t.theme;

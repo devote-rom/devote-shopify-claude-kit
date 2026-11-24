@@ -1,0 +1,45 @@
+# Runs the kit's tests on a Mac and on Windows on every push and pull request, so a change that
+# breaks either is found here and not by someone at Devote mid-deploy. Before 24 Nov 2026 nothing
+# ran them automatically and no change was ever tested on Windows before staff used it.
+name: tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 21 * * 0" # Monday 7am in Brisbane
+  workflow_dispatch:
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests
+        shell: bash
+        env:
+          KIT_CLIENT_NAMES: ${{ secrets.KIT_CLIENT_NAMES }}
+        run: |
+          git config --global user.email "kit-tests@example.com"
+          git config --global user.name "kit tests"
+          # The client names the no-client-names test looks for. Kept out of this public repo.
+          printf '%s\n' "$KIT_CLIENT_NAMES" > .client-names
+          node --test tests/*.test.mjs
+  shopify-cli-major:
+    # Fails when Shopify releases a CLI major newer than the one install-shopify-cli.sh installs,
+    # so the kit is checked against it before anyone raises CLI_MAJOR.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Newest Shopify CLI major
+        run: |
+          pinned=$(sed -n 's/^CLI_MAJOR=//p' install-shopify-cli.sh)
+          latest=$(npm view @shopify/cli version)
+          echo "Kit installs CLI $pinned.x, newest is $latest"
+          [ "${latest%%.*}" -le "$pinned" ] || { echo "::error::Shopify CLI $latest is out. Run the kit against it before raising CLI_MAJOR in install-shopify-cli.sh."; exit 1; }

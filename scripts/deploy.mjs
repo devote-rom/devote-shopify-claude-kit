@@ -36,17 +36,21 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { reviewLink } from "./approval.mjs";
-import { execCli, slashes, slashKeys, sleepSync } from "./platform.mjs";
+import { execCli, flag, flagValues, slashes, slashKeys, sleepSync } from "./platform.mjs";
 import { checkStore } from "./dev-store.mjs";
 import { servesShopify, unlock as unlockStorefront, walkTarget } from "./qa/preview-session.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { CODE_GLOBS, classify, codeFilesIn, hashFile } from "./theme-sync.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const arg = (name) => { const i = process.argv.indexOf(name); return i > -1 ? process.argv[i + 1] : null; };
+const arg = (name) => flag(name);
 const STORE = arg("--store") || process.env.SHOPIFY_STORE;
 const THEME = arg("--theme") || process.env.THEME_ID;
 if (!STORE || !THEME) { console.log("Say which store and theme: --store x.myshopify.com --theme <id>, or SHOPIFY_STORE and THEME_ID. Stopping."); process.exit(1); }
+for (const n of ["--store", "--theme"]) {
+  const all = flagValues(n);
+  if (all.length > 1) console.log(`${n} was given ${all.length} times (${all.join(", ")}). Using ${arg(n)}, the last one, which is the one typed after npm run deploy --.`);
+}
 const WITH_JSON = process.argv.includes("--with-json");
 const PULL_ONLY = process.argv.includes("--pull");
 const BASELINE = join(ROOT, ".editor-baseline.json");

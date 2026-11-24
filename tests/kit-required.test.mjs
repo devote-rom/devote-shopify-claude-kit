@@ -18,11 +18,13 @@ const DISK = new Set([
   "/w/app/shopify.app.toml",
   "/w/notes",
 ]);
-const exists = (p) => DISK.has(p);
+// On Windows the hook resolves /w/bare to D:\w\bare, so the pretend disk is looked up without the
+// drive and with forward slashes. Found on 24 Nov 2026 by the first Windows test run.
+const exists = (p) => DISK.has(String(p).replace(/^[A-Za-z]:/, "").replace(/\\/g, "/"));
 
 test("editing a theme file in a folder without the kit is blocked, and says to run setup", { skip: !inKit }, async () => {
   const { editVerdict } = await import("../hooks/kit-required.mjs");
-  assert.match(editVerdict("/w/bare/sections/main-product.liquid", { exists }), /\/devote-shopify:setup skill in \/w\/bare/);
+  assert.match(editVerdict("/w/bare/sections/main-product.liquid", { exists }), /\/devote-shopify:setup skill in (?:[A-Za-z]:)?[\\/]w[\\/]bare/);
   assert.match(editVerdict("/w/bare/snippets/deep/x.liquid", { exists }), /BLOCKED/);
   assert.match(editVerdict("/w/app/extensions/block/x.liquid", { exists }), /BLOCKED/);
 });

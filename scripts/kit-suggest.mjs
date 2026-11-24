@@ -8,13 +8,14 @@
 //   node scripts/kit-suggest.mjs --lesson "..." --rule "..." --happened "..."
 import { existsSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { flag } from "./platform.mjs";
 import { fileURLToPath } from "node:url";
 
 const FORM = "https://docs.google.com/forms/d/e/1FAIpQLSfgTYp6be_ahb0W8Hzbn3hxZmq_bxBSnbNJ-a9jN2l_bbXUbg/formResponse";
 const FIELDS = { lesson: "entry.867450419", rule: "entry.456012717", happened: "entry.1868132", brand: "entry.254203459", version: "entry.847451385" };
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const arg = (n) => { const i = process.argv.indexOf(n); return i > -1 ? process.argv[i + 1] : null; };
+const arg = (n) => flag(n);
 const lesson = arg("--lesson"), rule = arg("--rule"), happened = arg("--happened");
 if (!lesson || !rule || !happened) {
   console.log('Usage: node scripts/kit-suggest.mjs --lesson "what was learnt" --rule "the rule or check that would stop it" --happened "what went wrong"');
