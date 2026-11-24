@@ -23,9 +23,13 @@ jobs:
           node-version: 22
       - name: Tests
         shell: bash
+        env:
+          KIT_CLIENT_NAMES: ${{ secrets.KIT_CLIENT_NAMES }}
         run: |
           git config --global user.email "kit-tests@example.com"
           git config --global user.name "kit tests"
+          # The client names the no-client-names test looks for. Kept out of this public repo.
+          printf '%s\n' "$KIT_CLIENT_NAMES" > .client-names
           node --test tests/*.test.mjs
   shopify-cli-major:
     # Fails when Shopify releases a CLI major newer than the one install-shopify-cli.sh installs,

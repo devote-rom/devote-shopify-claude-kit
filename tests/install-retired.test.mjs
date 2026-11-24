@@ -22,6 +22,7 @@ test("a retired script is kept aside and its hook is taken out; the kit's gate s
     const put = (f, body) => { mkdirSync(dirname(f), { recursive: true }); writeFileSync(f, body); };
     put(join(repo, "sections", "main.liquid"), "<p>x</p>\n");
     put(join(repo, "scripts", "qa", "editor-push-gate.mjs"), "process.exit(0);\n");
+    put(join(repo, "tests", "editor-push-gate.test.mjs"), "import '../scripts/qa/editor-push-gate.mjs';\n");
     put(join(repo, ".claude", "settings.json"), JSON.stringify({
       hooks: {
         PreToolUse: [
@@ -43,6 +44,8 @@ test("a retired script is kept aside and its hook is taken out; the kit's gate s
 
     assert.equal(existsSync(join(repo, "scripts", "qa", "editor-push-gate.mjs")), false);
     assert.equal(existsSync(join(repo, "scripts", "qa", "editor-push-gate.mjs.before-devote-kit")), true);
+    assert.equal(existsSync(join(repo, "tests", "editor-push-gate.test.mjs")), false, "a retired script's test goes with it");
+    assert.equal(existsSync(join(repo, "tests", "editor-push-gate.test.mjs.before-devote-kit")), true);
     const settings = readFileSync(join(repo, ".claude", "settings.json"), "utf8");
     assert.doesNotMatch(settings, /editor-push-gate/);
     const pre = JSON.parse(settings).hooks.PreToolUse;
