@@ -159,6 +159,11 @@ vendor the live theme tests, and finds text the live theme shows on some product
 3. **Unused is not missing.** A tag no product carries, or a template nothing is assigned to, is
    listed as unused and passes. A template count needs `shopify store auth --store <store> --scopes
    read_products,read_content` once; without it templates cannot be counted, so they stay missing.
+   When the walk prints that command, run it yourself: it opens a Shopify sign-in in the browser,
+   and the person only approves read access to products and pages. Then run the walk again.
+   When the product catalogue is NOT CHECKED, the line says why. "Shopify is limiting requests"
+   means wait 30 minutes and run it once more; an HTTP status or the password page is a real
+   problem to fix, not a reason to send the person a kit question.
 4. **Tell a person what was dropped.** The handover names every "handled" item that was dropped,
    so the client hears it from us before a customer tells them. Commit `design/carryover-report.md`
    and `design/carryover.json`.

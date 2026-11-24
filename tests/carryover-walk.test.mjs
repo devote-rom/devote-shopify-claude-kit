@@ -169,3 +169,15 @@ test("a handled note has to say what the new build does", () => {
   assert.ok(!genericNote("Dropped: the client stopped local delivery in September (Jane, 3 Nov)"));
   assert.equal(describe("tag:local-only"), 'product tag "local-only"');
 });
+
+test("a template.suffix contains test matches any template whose suffix holds the text", () => {
+  const before = { "sections/image-banner.liquid": "{% if template.suffix contains 'vehicle-' %}<h1>{{ product.title }}</h1>{% endif %}" };
+  const ids = Object.keys(themeSignals(before));
+  assert.ok(ids.includes("template:*.*vehicle-*"), ids.join(", "));
+  const kept = { "sections/image-banner.liquid": before["sections/image-banner.liquid"], "templates/product.vehicle-ranger.json": "{}" };
+  assert.equal(stillPresent("template:*.*vehicle-*", kept), true, "product.vehicle-ranger holds 'vehicle-'");
+  assert.equal(stillPresent("template:*.*vehicle-*", { "templates/product.json": "{}" }), false);
+  assert.equal(templateCount("template:*.*vehicle-*", { "product.vehicle-ranger": 3, "product.vehicle-hilux": 2, "product.rv": 9 }, ""), 5);
+  // An == test still needs that exact suffix.
+  assert.equal(stillPresent("template:*.vehicle", kept), false);
+});
