@@ -36,7 +36,7 @@ import { fileURLToPath } from "node:url";
 import { onPasswordPage } from "./preview-session.mjs";
 import { execCli, isMain, slashes } from "../platform.mjs";
 import { executeData, themeList } from "../shopify-json.mjs";
-import { pacedFetch } from "./pace.mjs";
+import { pacedFetch, THROTTLED_MESSAGE } from "./pace.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const THEME_DIRS = ["layout", "sections", "snippets", "blocks", "templates", "config", "locales", "assets"];
@@ -44,6 +44,9 @@ const THEME_DIRS = ["layout", "sections", "snippets", "blocks", "templates", "co
 // ------------------------------------------------------------------------------ pure functions
 
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A template suffix as a pattern. A `template.suffix contains 'x'` test is recorded as "*x*", and
+// "*" stands for any run of suffix characters, so it matches product.x-ranger as well as product.x.
+const suffixRe = (s) => s.split("*").map(esc).join("[\\w-]*");
 const KINDS = {
   tag: "product tag", "customer-tag": "customer tag", type: "product type", vendor: "vendor",
   handle: "handle", template: "alternate template", metafield: "metafield", metaobject: "metaobject",
@@ -112,7 +115,7 @@ export function themeSignals(files) {
     scan(/\b(?:product|item|card_product|prod|p)(?:\.product)?\.type\s*(?:==|!=|contains)\s*['"]([^'"]+)['"]/g, (m) => `type:${m[1]}`);
     scan(/\b(?:product|item|card_product|prod|p)(?:\.product)?\.vendor\s*(?:==|!=|contains)\s*['"]([^'"]+)['"]/g, (m) => `vendor:${m[1]}`);
     scan(/\b(product|collection|page|blog|article)\.handle\s*(?:==|!=|contains)\s*['"]([^'"]+)['"]/g, (m) => `handle:${m[1]}/${m[2]}`);
-    scan(/\btemplate\.suffix\s*(?:==|!=|contains)\s*['"]([^'"]+)['"]/g, (m) => `template:*.${m[1]}`);
+    scan(/\btemplate\.suffix\s*(==|!=|contains)\s*['"]([^'"]+)['"]/g, (m) => `template:*.${m[1] === "contains" ? `*${m[2]}*` : m[2]}`);
     scan(/\bmetafields\.([a-z0-9_-]+)\.([a-z0-9_-]+)/gi, (m) => `metafield:${m[1]}.${m[2]}`);
     scan(/\bmetafields\[\s*['"]([^'"]+)['"]\s*\]\s*\[\s*['"]([^'"]+)['"]\s*\]/g, (m) => `metafield:${m[1]}.${m[2]}`);
     scan(/\bmetaobjects\.([a-z0-9_-]+)/gi, (m) => (/^(values|size|first|last)$/.test(m[1]) ? null : `metaobject:${m[1]}`));
@@ -163,7 +166,7 @@ export function stillPresent(id, files, { html = "" } = {}) {
     case "template": {
       const [type, suffix] = [value.slice(0, value.indexOf(".")), value.slice(value.indexOf(".") + 1)];
       return Object.keys(files).some((p) => type === "*"
-        ? new RegExp(`^templates/\\w+\\.${esc(suffix)}\\.(json|liquid)$`).test(p)
+        ? new RegExp(`^templates/\\w+\\.${suffixRe(suffix)}\\.(json|liquid)$`).test(p)
         : p === `templates/${type}.${suffix}.json` || p === `templates/${type}.${suffix}.liquid`);
     }
     case "metafield": {
@@ -310,9 +313,9 @@ export function templateCount(id, usage, code) {
   if (!usage) return null;
   const value = id.slice(id.indexOf(":") + 1);
   const [type, suffix] = [value.slice(0, value.indexOf(".")), value.slice(value.indexOf(".") + 1)];
-  const n = type === "*" ? Object.entries(usage).filter(([k]) => k.endsWith(`.${suffix}`)).reduce((a, [, v]) => a + v, 0) : usage[value];
+  const n = type === "*" ? Object.entries(usage).filter(([k]) => new RegExp(`\\.${suffixRe(suffix)}$`).test(k)).reduce((a, [, v]) => a + v, 0) : usage[value];
   if (n) return n;
-  const viewed = new RegExp(`view[=:]\\s*\\\\?['"]?${esc(suffix)}\\b`).test(code);
+  const viewed = new RegExp(`view[=:]\\s*\\\\?['"]?${suffixRe(suffix)}\\b`).test(code);
   if (viewed) return null; // used by a script, not by assignment: cannot be counted, so not "unused"
   return ["product", "collection", "page", "blog", "article"].includes(type) || type === "*" ? 0 : null;
 }
@@ -374,17 +377,18 @@ function readScripts(dir) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let UNLOCK = "";
-async function get(url, cookie = "", tries = 4) {
+// Why the last get() came back empty, so a NOT CHECKED line can say what stopped it.
+let lastMiss = "";
+async function get(url, cookie = "") {
   cookie = [UNLOCK, cookie].filter(Boolean).join("; ");
-  for (let i = 0; i < tries; i++) {
-    const r = await pacedFetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(cookie ? { cookie } : {}) } }).catch(() => null);
-    if (r && r.status === 429) { await sleep(2000 * (i + 1)); continue; }
-    if (!r || !r.ok) return null;
-    // Landed on the storefront password page: not the page that was asked for, so not checked.
-    if (onPasswordPage(r.url)) return null;
-    return r.text();
-  }
-  return null;
+  // pacedFetch throws on a 429 (and on every request for 30 minutes after one), so there is no retry here.
+  const r = await pacedFetch(url, { redirect: "follow", headers: { "user-agent": "Mozilla/5.0 (Devote carryover walk)", ...(cookie ? { cookie } : {}) } })
+    .catch((e) => { lastMiss = e.throttled ? THROTTLED_MESSAGE : `the request failed (${e.cause?.code || e.message})`; return null; });
+  if (!r) return null;
+  if (!r.ok) { lastMiss = `the store answered HTTP ${r.status}`; return null; }
+  // Landed on the storefront password page: not the page that was asked for, so not checked.
+  if (onPasswordPage(r.url)) { lastMiss = "the store showed its password page (check .storefront-password)"; return null; }
+  return r.text();
 }
 // Shopify answers ?preview_theme_id with a redirect that sets a cookie, then serves the live theme
 // to any request without it. A preview page only counts once it is proved to be that theme.
@@ -447,12 +451,12 @@ async function main() {
   const base = process.env.CARRYOVER_BASE || `https://${domain}`;
   UNLOCK = process.env.PREVIEW_COOKIE || "";
   const products = [];
-  let capped = false, catalogueOk = true;
+  let capped = false, catalogueOk = true, catalogueMiss = "";
   for (let page = 1; page <= 40; page++) {
     const body = await get(`${base}/products.json?limit=250&page=${page}`);
-    if (body == null) { catalogueOk = page > 1; break; }
+    if (body == null) { catalogueOk = page > 1; catalogueMiss = lastMiss; break; }
     let list = [];
-    try { list = JSON.parse(body).products || []; } catch { catalogueOk = false; break; }
+    try { list = JSON.parse(body).products || []; } catch { catalogueOk = false; catalogueMiss = "it did not answer with JSON"; break; }
     products.push(...list);
     if (list.length < 250) break;
     if (page === 40) capped = true;
@@ -518,7 +522,7 @@ async function main() {
     console.log(`FAIL  the before theme uses ${describe(r.id)}${n} and the new build does not:\n        ${r.where.join("\n        ")}`);
   }
   for (const p of notChecked) console.log(`NOT CHECKED  ${p}: could not fetch it on the before theme or the preview`);
-  if (!catalogueOk) console.log("NOT CHECKED  the product catalogue (/products.json), so tags, types and vendors could not be counted or sampled");
+  if (!catalogueOk) console.log(`NOT CHECKED  the product catalogue (${base}/products.json): ${catalogueMiss || "no answer"}. Tags, types and vendors could not be counted or sampled`);
   if (capped) console.log("NOTE  the catalogue has more than 10,000 products; counts are not shown and the sample is from the first 10,000");
   for (const ph of text.constant.slice(0, 15)) console.log(`WARN  every sampled product page says "${ph}" on the before theme and none does on the preview. Fine if the design dropped it on purpose; say so in the handover.`);
 
