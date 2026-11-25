@@ -7,7 +7,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { differingValues, hasKey, missingKeys, parseLocale, serializeLocale, translationKeys, withMissingKeys } from "../scripts/locale-keys.mjs";
+import { differingValues, hasKey, insertMissingKeys, missingKeys, parseLocale, serializeLocale, translationKeys, withMissingKeys } from "../scripts/locale-keys.mjs";
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -71,4 +71,32 @@ test("the guard passes when every key is there, and says so when there is no loc
   const none = guardIn({ "sections/a.liquid": "{{ 'general.open' | t }}" });
   assert.equal(none.status, 0);
   assert.match(none.stdout, /not checked/);
+});
+
+test("new keys go into live's own text: comments, notes, wording and layout stay as they were", () => {
+  const live = '/*\n * auto-generated\n */\n{\n    "general": {\n        // the menu label\n        "menu": "Menu",\n        "close": "Shut"\n    },\n    "empty": {}\n}\n';
+  const repo = { general: { menu: "Menu", close: "Close", open: "Open", search: { label: "Search" } }, empty: { a: "A" }, products: { sold_out: "Sold out" } };
+  const out = insertMissingKeys(live, repo);
+  assert.ok(out, "inserted");
+  assert.match(out, /\/\/ the menu label/);
+  assert.match(out, /^\/\*\n \* auto-generated/);
+  assert.match(out, /\n {8}"open": "Open",/, "four-space layout kept");
+  const back = parseLocale(out).data;
+  assert.equal(back.general.close, "Shut");
+  assert.equal(back.general.open, "Open");
+  assert.equal(back.general.search.label, "Search");
+  assert.equal(back.empty.a, "A");
+  assert.equal(back.products.sold_out, "Sold out");
+  // every original line is still there, unchanged
+  for (const line of live.split("\n").filter((l) => l.trim() && !l.includes("{}"))) assert.ok(out.includes(line), line); // the empty group gains its key
+});
+
+test("nothing to add leaves live's text exactly as it was", () => {
+  const live = '{\n  "a": "b" // note\n}\n';
+  assert.equal(insertMissingKeys(live, { a: "changed" }), live);
+});
+
+test("keys in comment, doc and raw blocks are not used; a | t on the next line is", () => {
+  const liquid = "{% doc %}\n  {{ 'example.only' | t }}\n{% enddoc %}\n{% comment %}{{ 'old.key' | t }}{% endcomment %}\n{%- raw -%}{{ 'raw.key' | t }}{%- endraw -%}\n{{ 'real.key'\n  | t }}";
+  assert.deepEqual(translationKeys(liquid), [{ key: "real.key", line: 6 }]);
 });

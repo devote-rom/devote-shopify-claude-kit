@@ -23,7 +23,7 @@ import { pushResult, themeList } from "./shopify-json.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
-import { differingValues, missingKeys, parseLocale, serializeLocale, withMissingKeys } from "./locale-keys.mjs";
+import { differingValues, insertMissingKeys, missingKeys, parseLocale } from "./locale-keys.mjs";
 
 const target = deployTarget();
 if (!target.store) { console.log("package.json's deploy script has no --store. Stopping."); process.exit(1); }
@@ -109,8 +109,11 @@ for (const f of editorIn(ROOT).filter((f) => f.startsWith("locales/") && liveEdi
   const added = missingKeys(mine.data, theirs.data);
   const kept = differingValues(mine.data, theirs.data);
   if (kept.length) console.log(`${f}: ${kept.length} text value(s) differ from live and were left as live has them: ${kept.slice(0, 8).join(", ")}${kept.length > 8 ? ", ..." : ""}`);
-  if (added.length && theirs.innerComments) console.log(`${f}: live's copy has comments inside it (translator notes), which the release cannot keep while adding keys. The text is unchanged.`);
-  if (added.length) localeMerges.push({ f, added, text: serializeLocale({ comment: theirs.comment, data: withMissingKeys(theirs.data, mine.data) }) });
+  if (!added.length) continue;
+  // Written into live's own text, so its comments, translator notes and layout stay as they are.
+  const text = insertMissingKeys(readFileSync(join(liveEditor, f), "utf8"), mine.data);
+  if (!text) { console.log(`Not releasing: the new text keys (${added.slice(0, 6).join(", ")}) could not be added to live's ${f} without changing anything else in it. Add them to live's copy by hand in the theme editor (Edit default theme content), then release.`); process.exit(1); }
+  localeMerges.push({ f, added, text });
 }
 
 const files = [...changed, ...newTemplates, ...localeMerges.map((m) => m.f)];

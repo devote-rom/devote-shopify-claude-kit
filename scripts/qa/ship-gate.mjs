@@ -120,7 +120,9 @@ function stepGoesLive(step, root) {
   return PUBLISH.test(step) || SHORT_LIVE.test(step) || (USES_ENVIRONMENT.test(step) && tomlGoesLive(root));
 }
 
-const steps = (cmd) => cmd.split(/&&|\|\||[;&|\n`]|\$\(/);
+// A backslash at the end of a line continues the command, so join those first: otherwise a flag on
+// the next line is a step of its own and the short-flag check never sees it with its push.
+const steps = (cmd) => cmd.replace(/\\\r?\n/g, " ").split(/&&|\|\||[;&|\n`]|\$\(/);
 
 export function isPublish(command, { root = ROOT } = {}) {
   return steps(executablePart(command)).some((s) => stepGoesLive(s, root));

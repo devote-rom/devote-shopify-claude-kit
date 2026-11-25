@@ -15,7 +15,7 @@ test("copy and a few lines in one file the theme already runs take the fast lane
   assert.equal(smallVerdict([{ path: "locales/en.default.json" }]).ok, true);
   assert.equal(smallVerdict([{ path: "locales/en.default.json" }, { path: "locales/fr.json" }]).ok, true);
   assert.equal(smallVerdict([edit("sections/hero.liquid", ["  <h2>{{ 'hero.title' | t }}</h2>"], ["  <h2>Title</h2>"]), { path: "locales/en.default.json" }]).ok, true);
-  assert.equal(smallVerdict([edit("assets/base.css", [".card { border-radius: 4px; }"], [".card { border-radius: 2px; }"])]).ok, true, "border is not order");
+  assert.equal(smallVerdict([edit("sections/hero.liquid", [".hero { border-radius: 4px; }"], [".hero { border-radius: 2px; }"])]).ok, true, "border is not order");
 });
 
 test("anything bigger, newer or near money takes the full deploy", () => {
@@ -29,11 +29,13 @@ test("anything bigger, newer or near money takes the full deploy", () => {
     [[edit("snippets/price.liquid", ["x"])], /money, the cart or checkout/],
     [[edit("sections/a.liquid", ["x"]), edit("snippets/b.liquid", ["y"])], /2 code files/],
     [[{ path: "snippets/new.liquid", isNew: true }], /is new/],
-    [[{ path: "assets/logo.png", binary: true }], /not a text file/],
+    [[{ path: "sections/a.liquid", binary: true }], /not a text file/],
     [[edit("sections/a.liquid", Array(MAX_LINES + 1).fill("x"))], /changed lines/],
     [[edit("sections/a.liquid", ["{{ product.compare_at_price | money }}"])], /touches money/],
     [[edit("snippets/card.liquid", ["{% if cart.item_count > 0 %}"])], /touches money/],
     [[{ path: "sections/a.liquid", error: "git missing" }], /could not be compared/],
+    [[edit("assets/base.css", [".card { border-radius: 4px; }"])], /reaches every page/],
+    [[edit("layout/theme.liquid", ["<meta name=x>"])], /reaches every page/],
   ];
   for (const [changes, why] of cases) {
     const v = smallVerdict(changes);

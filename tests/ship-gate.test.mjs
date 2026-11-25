@@ -71,6 +71,8 @@ test("rule 1: the short flags and --publish are live too", () => {
     "shopify theme push -nl",
     "shopify theme dev --store acme -a",
     "npx shopify theme push --only snippets/x.liquid -l",
+    "shopify theme push --store x --theme 1 \\\n  -a",
+    "shopify theme push --store x \\\n  --theme 1 \\\n  --publish",
   ]) assert.equal(isPublish(cmd), true, cmd);
 });
 

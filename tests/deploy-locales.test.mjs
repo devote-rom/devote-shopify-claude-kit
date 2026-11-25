@@ -26,7 +26,7 @@ if (a[0] === "theme" && a[1] === "list") { console.log(JSON.stringify([{ id: 1, 
 if (a[0] === "theme" && a[1] === "pull") {
   const only = a.flatMap((x, i) => (x === "--only" ? [a[i + 1]] : []));
   const re = only.map((g) => new RegExp("^" + g.replace(/[.]/g, "\\\\.").replace(/\\*/g, "[^/]*") + "$"));
-  const src = process.env.FAKE_THEME, dest = opt("--path");
+  const src = opt("--theme") === "1" && process.env.FAKE_LIVE ? process.env.FAKE_LIVE : process.env.FAKE_THEME, dest = opt("--path");
   for (const f of walk(src)) { const r = rel(src, f); if (re.some((x) => x.test(r))) { mkdirSync(dirname(join(dest, r)), { recursive: true }); cpSync(f, join(dest, r)); } }
   process.exit(0);
 }
@@ -74,7 +74,10 @@ function setup() {
   writeFileSync(join(repo, ".review-stamp.json"), JSON.stringify({ hash: stamp.stdout.trim(), at: "test", code: "c.md", security: "s.md" }));
   const deploy = (...extra) => spawnSync(process.execPath, [join(repo, "scripts", "deploy.mjs"), "--store", "acme.myshopify.com", "--theme", "2", "--first-sync", ...(extra.includes("--small") ? ["--domain", "www.acme.com.au"] : ["--skip-walks"]), ...extra], { cwd: repo, env, encoding: "utf8" });
   const pushed = () => readFileSync(log, "utf8").split("\n").filter(Boolean).flatMap((l) => JSON.parse(l));
-  return { dir, repo, theme, deploy, pushed };
+  const live = join(dir, "live");
+  env.FAKE_LIVE = live;
+  put(live, { "sections/a.liquid": "{{ 'general.close' | t }}", "locales/en.default.json": LOCALE, "templates/index.json": TEMPLATE });
+  return { dir, repo, theme, live, deploy, pushed };
 }
 
 test("a changed locale file goes up with the code, without --with-json", () => {
@@ -108,6 +111,19 @@ test("the fast lane refuses a change that is not small, before anything is pushe
     const r = deploy("--small", "--page", "/");
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stdout, /Not a small change: snippets\/price\.liquid handles money/);
+    assert.deepEqual(pushed(), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the fast lane measures against live: a small fix on top of a bigger preview change is not small", () => {
+  const { dir, repo, theme, deploy, pushed } = setup();
+  try {
+    const big = Array.from({ length: 30 }, (_, i) => `<p>line ${i}</p>`).join("\n");
+    put(theme, { "sections/a.liquid": big }); // already on the preview, never released
+    put(repo, { "sections/a.liquid": big + "\n<p>one more</p>" });
+    const r = deploy("--small", "--page", "/");
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /Not a small change: sections\/a\.liquid has \d+ changed lines/);
     assert.deepEqual(pushed(), []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -6,8 +6,10 @@
 // the changed page (visual at 390, 768, 1024 and 1440px, accessibility at 390 and 1440px) and writes
 // a QA pass that says which walks did not run, so the approver knows what they are signing off.
 //
-// Small means: locale text, and at most one code file the theme already runs with a few changed
-// lines. Never template or settings JSON, never a new file, never anything that touches money, the
+// Small means: locale text, and at most one section, snippet or block live already runs, with a few
+// changed lines. Measured against live, because release ships everything that differs from live,
+// not just the last fix. Never template or settings JSON, never layout or assets (they reach every
+// page, and only up to three are checked), never a new file, never anything that touches money, the
 // cart or checkout.
 import { spawnSync } from "node:child_process";
 
@@ -21,17 +23,18 @@ const MONEY = /(?<![a-z])(cart|checkout|price|money|discount|gift[_-]?card|tax|s
  */
 export function smallVerdict(changes) {
   const no = (why) => ({ ok: false, why });
-  if (!changes.length) return no("nothing differs from the theme");
+  if (!changes.length) return no("nothing differs from live");
   for (const c of changes) {
     if (/^(templates\/[^/]*\.json|templates\/customers\/[^/]*\.json|config\/|sections\/[^/]*\.json)/.test(c.path)) return no(`${c.path} is template or settings JSON`);
     if (MONEY.test(c.path)) return no(`${c.path} handles money, the cart or checkout`);
+    if (/^(layout|assets)\//.test(c.path)) return no(`${c.path} reaches every page, and the fast lane checks only the pages named`);
   }
   const code = changes.filter((c) => !c.path.startsWith("locales/"));
   if (code.length > 1) return no(`${code.length} code files changed (${code.map((c) => c.path).slice(0, 4).join(", ")}), and the fast lane takes one`);
   if (code.length === 1) {
     const c = code[0];
-    if (c.error) return no(`${c.path} could not be compared with the theme (${c.error})`);
-    if (c.isNew) return no(`${c.path} is new, not code the theme already runs`);
+    if (c.error) return no(`${c.path} could not be compared with live (${c.error})`);
+    if (c.isNew) return no(`${c.path} is new, not code live already runs`);
     if (c.binary) return no(`${c.path} is not a text file`);
     const lines = [...(c.added || []), ...(c.removed || [])];
     if (lines.length > MAX_LINES) return no(`${c.path} has ${lines.length} changed lines, more than ${MAX_LINES}`);
