@@ -46,6 +46,12 @@ export function statusOk(path, status) {
   return status < 400;
 }
 
+/** Whether the state pages file holds the fixed pages only, because the last look was refused. */
+export function stateIncomplete({ file = STATE_FILE } = {}) {
+  if (!existsSync(file)) return false;
+  try { return JSON.parse(readFileSync(file, "utf8")).incomplete === true; } catch { return true; }
+}
+
 /** How old the state pages file is, in days, or null when there is none. */
 export function stateAgeDays({ file = STATE_FILE, now = Date.now() } = {}) {
   if (!existsSync(file)) return null;

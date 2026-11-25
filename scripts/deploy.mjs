@@ -30,7 +30,7 @@
 // Target: --store and --theme, or SHOPIFY_STORE and THEME_ID. Set them in package.json's deploy script.
 import { execFileSync, spawnSync } from "node:child_process";
 import { VISUAL_BASE, VISUAL_OUT, VISUAL_PENDING, clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
-import { stateAgeDays } from "./qa/page-list.mjs";
+import { stateAgeDays, stateIncomplete } from "./qa/page-list.mjs";
 import { THROTTLED_MESSAGE, throttled } from "./qa/pace.mjs";
 import { createHash } from "node:crypto";
 import { pushResult, themeList } from "./shopify-json.mjs";
@@ -373,7 +373,7 @@ if (PRELAUNCH) {
 // walks run without them, and the QA pass says so.
 const notRun = SMALL ? smallNotRun(PAGES) : PRELAUNCH ? ["live comparison", "journeys"] : [];
 const stateAge = stateAgeDays();
-if (!SMALL && !PRELAUNCH && (stateAge === null || stateAge > 30)) {
+if (!SMALL && !PRELAUNCH && (stateAge === null || stateAge > 30 || stateIncomplete())) {
   console.log("\nFinding sold-out, sale and other state pages on live (design/state-pages.json)");
   const r = spawnSync(process.execPath, [join(ROOT, "scripts/qa/find-state-pages.mjs")], { cwd: ROOT, stdio: "inherit", env: { ...process.env, SHOP_DOMAIN: DOMAIN } });
   if (r.status !== 0) notRun.push("sold-out, sale and other product state pages");
