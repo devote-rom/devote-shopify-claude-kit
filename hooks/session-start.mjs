@@ -21,8 +21,12 @@ export function advice({ isShopify, installed, current, missingTarget = [], noCa
       "Before any other work, run the /devote-shopify:setup skill, tell the person in one line that you are setting up the kit, then carry on with what they asked.";
   }
   if (installed !== current) {
+    // An urgent small fix finishes on the kit it started with: an update mid-fix cost one same-day
+    // follow-up its slot (Rom, 25 Nov 2026). The repo's own gate and checks still run meanwhile.
     return "The Devote Shopify kit in this repo is out of date (" + installed + ", latest " + current + "). " +
-      "Before any other work, run the /devote-shopify:setup skill to update it, tell the person in one line, then carry on with what they asked.";
+      "Run the /devote-shopify:setup skill to update it before starting new work, and tell the person in one line. " +
+      "If the person says this is an urgent small fix, or you are part way through one, finish that fix first on the kit already in this repo " +
+      "(its gate and checks still work), then update straight after, and tell the person you did it in that order.";
   }
   // Every session until it is fixed: without these, deploy cannot run its SEO, accessibility
   // and speed checks (two brands went weeks like that, 9 Oct 2026).

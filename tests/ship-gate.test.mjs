@@ -16,7 +16,12 @@ import {
   mergeTargets,
   makesApproval,
   writesApprovalFile,
+  isLivePullOnly,
+  themeFoldersDirty,
 } from "../scripts/qa/ship-gate.mjs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 test("rule 5: Claude never makes an approval, however it is spelled", () => {
   for (const cmd of [
@@ -53,6 +58,68 @@ test("rule 1: publishing a theme is blocked, however it is spelled", () => {
   ]) {
     assert.equal(isPublish(cmd), true, cmd);
   }
+});
+
+test("rule 1: the short flags and --publish are live too", () => {
+  // Until 1.10.0 all of these went straight through: -l is --live, -a is --allow-live, and
+  // -p / --publish publishes the theme it just pushed.
+  for (const cmd of [
+    "shopify theme push -l",
+    "shopify theme push --store acme -a",
+    "shopify theme push --theme 123 --publish",
+    "shopify theme push -t 123 -p",
+    "shopify theme push -nl",
+    "shopify theme dev --store acme -a",
+    "npx shopify theme push --only snippets/x.liquid -l",
+    "shopify theme push --store x --theme 1 \\\n  -a",
+    "shopify theme push --store x \\\n  --theme 1 \\\n  --publish",
+  ]) assert.equal(isPublish(cmd), true, cmd);
+});
+
+test("rule 1: an environment that turns on live in shopify.theme.toml is live", () => {
+  const root = mkdtempSync(join(tmpdir(), "gate-toml-"));
+  writeFileSync(join(root, "shopify.theme.toml"), '[environments.production]\nstore = "acme"\nlive = true\n');
+  assert.equal(isPublish("shopify theme push -e production", { root }), true);
+  assert.equal(isPublish("shopify theme push --environment production", { root }), true);
+  const quiet = mkdtempSync(join(tmpdir(), "gate-toml-"));
+  writeFileSync(join(quiet, "shopify.theme.toml"), '[environments.staging]\nstore = "acme"\ntheme = "123"\n');
+  assert.equal(isPublish("shopify theme push -e staging", { root: quiet }), false);
+});
+
+test("live pull: a pull from live, and nothing else live, may run", () => {
+  for (const cmd of [
+    "shopify theme pull --live",
+    "shopify theme pull --store acme --live",
+    "shopify theme pull -l --store acme",
+    "shopify theme pull --live --path /tmp/live-copy",
+    "git stash && shopify theme pull --live --store acme && git stash pop",
+  ]) {
+    assert.equal(isPublish(cmd), true, cmd); // still goes through the clean-tree check
+    assert.equal(isLivePullOnly(cmd), true, cmd);
+  }
+});
+
+test("live pull: anything that writes to live in the same command is not a pull", () => {
+  for (const cmd of [
+    "shopify theme pull --live && shopify theme push --live",
+    "shopify theme pull --live; shopify theme publish -t 1",
+    "shopify theme pull --live --allow-live",
+    "shopify theme pull --live && shopify theme push -a",
+    "shopify theme pull --live $(shopify theme delete -t 1)",
+    "shopify theme push --live",
+    "echo --live",
+  ]) assert.equal(isLivePullOnly(cmd), false, cmd);
+});
+
+test("an escaped backslash at a line end is not a continuation", () => {
+  assert.equal(isLivePullOnly("echo foo \\\\\nshopify theme pull --live"), true);
+  assert.equal(isPublish("echo done \\\\\nshopify theme push --unpublished"), false);
+});
+
+test("live pull: uncommitted theme work blocks it, a clean tree does not", () => {
+  assert.deepEqual(themeFoldersDirty({ status: () => "" }).files, []);
+  assert.deepEqual(themeFoldersDirty({ status: () => " M sections/header.liquid\n?? snippets/new.liquid\n" }).files, ["sections/header.liquid", "snippets/new.liquid"]);
+  assert.ok(themeFoldersDirty({ status: () => { throw new Error("not a git repository"); } }).error);
 });
 
 test("rule 1: the safe theme commands stay allowed", () => {

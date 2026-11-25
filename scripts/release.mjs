@@ -9,10 +9,12 @@
 //   - code files (sections, snippets, blocks, layout, assets, settings schema) that differ from live
 //   - template and settings JSON that live does not have yet (a new page template)
 //   - never a template or settings file live already has: those hold the live store's editor work
+//   - for a locale file live already has, only the text keys live lacks, added to live's own copy:
+//     every value live has stays as it is (the client edits those under Edit default theme content)
 //   - never over a live file this repo has never seen: someone changed live outside the repo
 //     (the code editor, an app). Those are brought into .theme-incoming/ and nothing is pushed.
 //   - nothing is deleted on the live theme
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { APPROVAL, ROOT, approvalVerdict, deployTarget, inGitHistory, readApproval, reviewLink, unknownLiveChanges } from "./approval.mjs";
@@ -21,6 +23,7 @@ import { pushResult, themeList } from "./shopify-json.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
+import { defaultLocaleFile, differingValues, hasKey, insertMissingKeys, missingKeys, parseLocale, translationKeys } from "./locale-keys.mjs";
 
 const target = deployTarget();
 if (!target.store) { console.log("package.json's deploy script has no --store. Stopping."); process.exit(1); }
@@ -96,12 +99,47 @@ const liveEditorFiles = new Set(editorIn(liveEditor));
 if (!liveEditorFiles.size) { console.log("Pulled no templates from the live theme, so it is not known which exist. Stopping."); process.exit(1); }
 const newTemplates = editorIn(ROOT).filter((f) => !liveEditorFiles.has(f));
 
-const files = [...changed, ...newTemplates];
+// 4b. Locale files live has: add the keys this code prints that live lacks, so the release does not
+// show "Translation missing" (Rom, 25 Nov 2026), without changing any wording live already has.
+const localeMerges = [];
+for (const f of editorIn(ROOT).filter((f) => f.startsWith("locales/") && liveEditorFiles.has(f))) {
+  const mine = parseLocale(readFileSync(join(ROOT, f), "utf8"));
+  const theirs = parseLocale(readFileSync(join(liveEditor, f), "utf8"));
+  if (!mine || !theirs) { console.log(`Not releasing: ${f} is not valid JSON ${mine ? "on the live theme" : "in the repo"}, so its new text keys cannot be added. Fix it, then release.`); process.exit(1); }
+  const added = missingKeys(mine.data, theirs.data);
+  const kept = differingValues(mine.data, theirs.data);
+  if (kept.length) console.log(`${f}: ${kept.length} text value(s) differ from live and were left as live has them: ${kept.slice(0, 8).join(", ")}${kept.length > 8 ? ", ..." : ""}`);
+  if (!added.length) continue;
+  // Written into live's own text, so its comments, translator notes and layout stay as they are.
+  const text = insertMissingKeys(readFileSync(join(liveEditor, f), "utf8"), mine.data);
+  if (!text) { console.log(`Not releasing: the new text keys (${added.slice(0, 6).join(", ")}) could not be added to live's ${f} without changing anything else in it. Add them to live's copy by hand in the theme editor (Edit default theme content), then release.`); process.exit(1); }
+  localeMerges.push({ f, added, text });
+}
+// Every key the code prints, that the repo's default locale has, must resolve on live after this. A key
+// that is text on live and a group in the repo (or the reverse) is neither added nor changed above.
+{
+  const def = defaultLocaleFile(ROOT);
+  const liveDefault = def && (localeMerges.find((m) => m.f === def)?.text ?? (existsSync(join(liveEditor, def)) ? readFileSync(join(liveEditor, def), "utf8") : null));
+  const mineDefault = def && parseLocale(readFileSync(join(ROOT, def), "utf8"));
+  const liveData = liveDefault && parseLocale(liveDefault);
+  if (mineDefault && liveData) {
+    const printed = codeFilesIn(ROOT).filter((f) => f.endsWith(".liquid")).flatMap((f) => translationKeys(readFileSync(join(ROOT, f), "utf8")).map((k) => k.key));
+    const broken = [...new Set(printed)].filter((k) => hasKey(mineDefault.data, k) && !hasKey(liveData.data, k));
+    if (broken.length) {
+      console.log(`Not releasing: live's ${def} would still lack ${broken.length} text key(s) the code prints, so live would show "Translation missing": ${broken.slice(0, 8).join(", ")}`);
+      console.log("Each is text on live where the repo has a group, or the reverse. Rename the key in the code and the repo's locale file so it does not clash with live's, deploy, get a new approval, then release.");
+      process.exit(1);
+    }
+  }
+}
+
+const files = [...changed, ...newTemplates, ...localeMerges.map((m) => m.f)];
 if (!files.length) { console.log("The live theme already has this code. Nothing to release."); rmSync(APPROVAL, { force: true }); process.exit(0); }
 
 // 5. Push just those files onto the live theme. A push "with errors" exits 0, so read the result.
 const stage = mkdtempSync(join(tmpdir(), "release-push-"));
-for (const f of files) { mkdirSync(dirname(join(stage, f)), { recursive: true }); cpSync(join(ROOT, f), join(stage, f)); }
+for (const f of [...changed, ...newTemplates]) { mkdirSync(dirname(join(stage, f)), { recursive: true }); cpSync(join(ROOT, f), join(stage, f)); }
+for (const m of localeMerges) { mkdirSync(dirname(join(stage, m.f)), { recursive: true }); writeFileSync(join(stage, m.f), m.text); }
 const out = run(["theme", "push", "--store", STORE, "--theme", LIVE, "--path", stage, "--nodelete", "--allow-live", "--json"], { stdio: ["ignore", "pipe", "inherit"] });
 const result = pushResult(out, stage);
 if (!result) { console.log("Could not read the push result, so it is not known what reached the live theme. Check it now. Stopping."); process.exit(1); }
@@ -117,6 +155,6 @@ if (Object.keys(errors).length) {
 rmSync(APPROVAL, { force: true });
 appendFileSync(join(ROOT, "releases.log"), JSON.stringify({ at: new Date().toISOString(), approvedBy: approval.by, approvedAt: approval.at, commit: approval.commit, liveTheme: LIVE, files }) + "\n");
 console.log(`Live: ${files.length} file(s) pushed to the live theme "${live.name}" (#${LIVE}), approved by ${approval.by}. The theme id is unchanged.`);
-for (const f of files) console.log(`  ${f}`);
+for (const f of files) { const m = localeMerges.find((x) => x.f === f); console.log(`  ${f}${m ? ` (${m.added.length} new text key${m.added.length === 1 ? "" : "s"} added to live's copy: ${m.added.slice(0, 6).join(", ")}${m.added.length > 6 ? ", ..." : ""})` : ""}`); }
 console.log(`\nCheck it: https://${target.domain || STORE}/`);
 console.log("Then merge this branch into main and commit releases.log.");

@@ -6,7 +6,8 @@
 //   1. PUBLISH: Claude never publishes a theme, never pushes to the live theme,
 //      and never deletes one. The client publishes their own shopfront. The one
 //      exception: on a development store (Shopify says so, scripts/dev-store.mjs)
-//      publishing and live pushes are allowed. Deleting a theme never is.
+//      publishing and live pushes are allowed. Deleting a theme never is. Pulling
+//      from live is allowed when the theme folders have no uncommitted changes.
 //
 //   2. MERCHANT FILES: a theme push must not carry config/settings_data.json or
 //      templates/*.json unless the command names them. Those hold what the
@@ -51,11 +52,23 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Deliberately broad: any route to publishing, overwriting or deleting a theme on
 // a real store. Read-only theme commands (list, pull, check, info, open) and
-// "push --unpublished" stay allowed.
-const PUBLISH =
-  /(?:^|[;&|`(]|\s)(?:npx\s+|pnpm\s+dlx\s+|bunx\s+|yarn\s+)?shopify\s+theme\s+(?:publish|delete)\b|--live\b|--allow-live\b/;
+// "push --unpublished" stay allowed. A pull from the live theme is caught here too,
+// because it writes live's files over the repo's; isLivePullOnly lets it through
+// when the theme folders have nothing uncommitted to lose.
+const CLI = String.raw`(?:^|[;&|\x60(]|\s)(?:npx\s+|pnpm\s+dlx\s+|bunx\s+|yarn\s+)?shopify\s+theme\s+`;
+const PUBLISH = new RegExp(CLI + String.raw`(?:publish|delete)\b|--live\b|--allow-live\b`);
+// The short and less obvious spellings, which until 1.10.0 went through: push -l (--live),
+// -a (--allow-live) and -p or --publish (publishes the theme it pushed), dev -a, and pull -l.
+// Any single-dash flag group holding one of those letters counts, which fails toward blocking.
+const REST = String.raw`(?:[^;&|\x60\n]*\s)?`;
+const SHORT_LIVE = new RegExp(CLI + String.raw`(?:push\s${REST}(?:--publish\b|-[a-zA-Z]*[lap])|dev\s${REST}-[a-zA-Z]*a|pull\s${REST}-[a-zA-Z]*l)`);
+// --environment reads its flags from shopify.theme.toml, where live, allow-live and publish can be set.
+const USES_ENVIRONMENT = new RegExp(CLI + String.raw`(?:push|dev|pull)\s${REST}(?:--environment\b|-[a-zA-Z]*e\b)`);
+const TOML_GOES_LIVE = /^\s*(?:live|allow-live|allow_live|publish)\s*=\s*true\b/m;
 
-const THEME_PUSH = /(?:^|[;&|`(]|\s)(?:npx\s+|pnpm\s+dlx\s+|bunx\s+|yarn\s+)?shopify\s+theme\s+push\b/;
+const THEME_PUSH = new RegExp(CLI + String.raw`push\b`);
+const THEME_PULL = new RegExp(CLI + String.raw`pull\b`);
+const OTHER_THEME_WRITE = new RegExp(CLI + String.raw`(?:push|publish|delete|dev|rename)\b`);
 const MERGE = /(?:^|[;&|]\s*)gh\s+pr\s+merge\b/;
 const PUSH = /(?:^|[;&|]\s*)git\s+(?:[^;&|]*\s)?push\b/;
 
@@ -97,8 +110,47 @@ export function executablePart(command) {
   return SHELL_INVOKED.test(command) ? command : withoutHeredocBodies(command);
 }
 
-export function isPublish(command) {
-  return PUBLISH.test(executablePart(command));
+/** Whether an environment in shopify.theme.toml turns on live, allow-live or publish. */
+function tomlGoesLive(root) {
+  try { return TOML_GOES_LIVE.test(readFileSync(join(root, "shopify.theme.toml"), "utf8")); }
+  catch { return false; } // no toml: the CLI refuses an unknown environment itself
+}
+
+function stepGoesLive(step, root) {
+  return PUBLISH.test(step) || SHORT_LIVE.test(step) || (USES_ENVIRONMENT.test(step) && tomlGoesLive(root));
+}
+
+// A backslash at the end of a line continues the command, so join those first: otherwise a flag on
+// the next line is a step of its own and the short-flag check never sees it with its push.
+const steps = (cmd) => cmd.replace(/(?<!\\)((?:\\\\)*)\\\r?\n/g, "$1 ").split(/&&|\|\||[;&|\n`]|\$\(/);
+
+export function isPublish(command, { root = ROOT } = {}) {
+  return steps(executablePart(command)).some((s) => stepGoesLive(s, root));
+}
+
+/**
+ * Whether every step that touches the live theme is a pull from it, and nothing pushes, publishes,
+ * deletes or allows live. A pull only reads live, so it is the Live Sync a task starts with, and
+ * Claude may run it (Rom, 25 Nov 2026: Claude kept stopping for a person to run the pull).
+ */
+export function isLivePullOnly(command, { root = ROOT } = {}) {
+  const live = steps(executablePart(command)).filter((s) => stepGoesLive(s, root));
+  return live.length > 0 && live.every((s) => THEME_PULL.test(s) && !OTHER_THEME_WRITE.test(s) && !/--allow-live\b|--publish\b/.test(s));
+}
+
+const THEME_FOLDERS = ["sections", "snippets", "blocks", "layout", "assets", "config", "templates", "locales"];
+
+/**
+ * Uncommitted changes in the theme folders, which a live pull would write over.
+ * @returns {{ files: string[], error?: string }}
+ */
+export function themeFoldersDirty({ root = ROOT, status } = {}) {
+  try {
+    const out = status ? status() : execSync(`git status --porcelain -- ${THEME_FOLDERS.join(" ")}`, { cwd: root, encoding: "utf8", stdio: "pipe" });
+    return { files: out.split("\n").filter((l) => l.trim()).map((l) => l.slice(3)) };
+  } catch (e) {
+    return { files: [], error: String(e.message).split("\n")[0] };
+  }
 }
 
 const THEME_DELETE = /(?:^|[;&|`(]|\s)(?:npx\s+|pnpm\s+dlx\s+|bunx\s+|yarn\s+)?shopify\s+theme\s+delete\b/;
@@ -110,12 +162,12 @@ const THEME_DELETE = /(?:^|[;&|`(]|\s)(?:npx\s+|pnpm\s+dlx\s+|bunx\s+|yarn\s+)?s
  * allowed. "check" is injectable for the tests.
  * @returns {{ allow: boolean, reason: string }}
  */
-export function publishVerdict(command, { check = checkStore } = {}) {
+export function publishVerdict(command, { check = checkStore, root = ROOT } = {}) {
   const cmd = executablePart(command);
   if (THEME_DELETE.test(cmd)) return { allow: false, reason: "it deletes a theme, which is never allowed, development store or not" };
-  const steps = cmd.split(/&&|\|\||[;&|\n`]|\$\(/).filter((step) => PUBLISH.test(step));
+  const live = steps(cmd).filter((step) => stepGoesLive(step, root));
   const stores = new Set();
-  for (const step of steps) {
+  for (const step of live) {
     const named = storesInCommand(step);
     if (!named.length) return { allow: false, reason: "the command does not name its store with --store, so it cannot be checked as a development store" };
     named.forEach((s) => stores.add(s));
@@ -379,7 +431,21 @@ function main() {
   // Rule 1: Claude never publishes, overwrites or deletes a theme, except publishing or a live
   // push on a development store. The live theme changes through npm run release, after a person's
   // approval (rule 5).
-  if (isPublish(command)) {
+  if (isPublish(command) && isLivePullOnly(command)) {
+    // Reading live is allowed, but it writes live's files into the repo, so only over a clean tree.
+    const dirty = themeFoldersDirty();
+    if (dirty.error) deny(
+      `Live pull blocked: could not read git status (${dirty.error}), so it is not known whether ` +
+      "the pull would write over uncommitted work. Commit or stash, then pull again."
+    );
+    if (dirty.files.length) deny(
+      "Live pull blocked: the theme folders have uncommitted changes the pull would write over:\n  " +
+      dirty.files.slice(0, 15).join("\n  ") + (dirty.files.length > 15 ? `\n  and ${dirty.files.length - 15} more` : "") +
+      "\n\nStash them first (git stash), pull, then git stash pop and merge. Or commit them. " +
+      "Pushing to live, publishing and deleting stay blocked."
+    );
+    // clean: carry on to the rules below (a push in the same command is still checked)
+  } else if (isPublish(command)) {
     // Allowed on a development store, and the rules below (merchant files, QA) still apply.
     const verdict = publishVerdict(command);
     if (!verdict.allow) deny(
