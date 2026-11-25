@@ -55,6 +55,8 @@ function setup({ liveLocale, repoLocale, liquid }) {
   writeFileSync(log, "");
   const env = { ...process.env, FAKE_THEME: live, FAKE_LIVE: live, FAKE_LOG: log, PATH: bin + delimiter + (process.env.PATH ?? process.env.Path ?? "") };
   delete env.Path;
+  // A git hook sets GIT_DIR; inherited, git in the scripts below reads the kit's repo, not this one
+  for (const k of Object.keys(env)) if (k.startsWith("GIT_")) delete env[k];
   const OLD = "<p>old</p>";
   put(live, { "sections/a.liquid": OLD, "locales/en.default.json": liveLocale, "templates/index.json": "{}" });
   put(repo, {
@@ -63,10 +65,10 @@ function setup({ liveLocale, repoLocale, liquid }) {
     "templates/index.json": "{}",
     "package.json": JSON.stringify({ scripts: { deploy: "node scripts/deploy.mjs --store acme.myshopify.com --theme 2 --domain www.acme.com.au" } }),
   });
-  const git = (...a) => execFileSync("git", a, { cwd: repo, stdio: "pipe" });
+  const git = (...a) => execFileSync("git", a, { cwd: repo, stdio: "pipe", env });
   git("init", "-q"); git("add", "-A"); git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "live as pulled");
   put(repo, { "sections/a.liquid": liquid });
-  const hash = spawnSync(process.execPath, ["--input-type=module", "-e", `import { codeHash } from ${JSON.stringify(new URL("file://" + join(repo, "scripts", "review-stamp.mjs")).href)}; console.log(codeHash())`], { cwd: repo, encoding: "utf8" }).stdout.trim();
+  const hash = spawnSync(process.execPath, ["--input-type=module", "-e", `import { codeHash } from ${JSON.stringify(new URL("file://" + join(repo, "scripts", "review-stamp.mjs")).href)}; console.log(codeHash())`], { cwd: repo, env, encoding: "utf8" }).stdout.trim();
   put(repo, {
     ".review-stamp.json": JSON.stringify({ hash, at: "t", code: "c.md", security: "s.md" }),
     ".qa-pass.json": JSON.stringify({ codeHash: hash, store: "acme.myshopify.com", theme: "2" }),
