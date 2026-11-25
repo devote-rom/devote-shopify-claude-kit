@@ -21,8 +21,11 @@ Do not delete rules because they look obvious. They all look obvious afterwards.
 
 ## Never, on any store
 
-1. **Never push to the live theme yourself.** Not `--live`, not `--allow-live`, not by
-   publishing what you pushed. Push to the preview, hand over the review link, and
+1. **Never push to the live theme yourself.** Not `--live`, not `--allow-live`, not `-l`, `-a`,
+   `-p` or `--publish`, not by publishing what you pushed. **Pulling from live is fine:**
+   `shopify theme pull --live` (the Live Sync at the start of a task, a QA round or a release) is
+   yours to run when the theme folders have no uncommitted changes. If they do, the gate refuses
+   and says so: `git stash`, pull, `git stash pop`, merge. Push to the preview, hand over the review link, and
    a person approves. **Approved work reaches live through `npm run release`**, which
    keeps the live theme's id (see "Approve, then release"). Only a person runs
    `npm run approve`; the gate refuses it from Claude. **The other exception: a development store.** Nobody shops there,
@@ -99,6 +102,22 @@ or group of pages is built in this order, every time:
 An edit to shared CSS (the stylesheet, the product card, the header) still gets an unfiltered
 parity run before anything else is deployed, as "Match the design, not just the brief" says.
 A report never rests on a `--skip-walks` deploy.
+
+### The fast lane for small changes
+
+A copy fix, or a few lines in one file of code the theme already runs, does not need every walk on
+every page. `npm run deploy -- --small --page /products/<handle>` (up to three pages, comma
+separated) pushes to the brand's usual preview theme, then runs the visual walk (390, 768, 1024 and
+1440px) and the accessibility walk (390 and 1440px) on those pages only. It takes 5 to 10 minutes
+instead of about an hour, stays inside Shopify's rate limit and uses no new theme slot.
+
+It refuses, before pushing, anything that is not small (`scripts/small-change.mjs`): template or
+settings JSON, more than one code file, more than 20 changed lines, a new file, or any file or
+changed line that touches money, the cart or checkout. Those take a full deploy. The reviews and
+`npm run qa` still run, and the QA pass it writes lists every walk that did not run, so the person
+approving sees exactly what was and was not checked. Then approve and release as usual: release
+pushes only the files that differ from live. Use the preview theme already in package.json; a
+same-day follow-up never needs a new theme.
 
 ## Forms keep their destination
 
@@ -222,9 +241,12 @@ npm run deploy -- --with-json   # also your template/settings changes, only if n
 npm run deploy -- --pull        # bring editor changes into the repo
 ```
 
-Editor-owned: `templates/*.json`, `config/settings_data.json`, `sections/*.json`. The
-deploy pulls them first and compares with `.editor-baseline.json`. If the theme changed,
-it copies their files into the repo and pushes nothing: review, commit, run again. The
+Editor-owned: `templates/*.json`, `config/settings_data.json`, `sections/*.json` and
+`locales/*.json`. The deploy pulls them first and compares with `.editor-baseline.json`. If the
+theme changed, it copies their files into the repo and pushes nothing: review, commit, run again.
+Once that check passes, every deploy pushes your changed `locales/*.json` with the code, so a new
+or renamed text key never shows "Translation missing" on the preview. Templates and settings still
+need `--with-json`. The
 ship gate blocks `shopify theme push --path` or `--only` on those files, because pushing
 them from a temp folder is how the editor's work gets overwritten.
 
@@ -257,6 +279,8 @@ npm run journeys                      # menus, phone drawer, search, filters, va
 npm run pages                         # find sold-out, sale, many-variant and long-title products, an empty collection; writes design/state-pages.json
 npm run deploy                        # the only push to the preview: QA, push, checks, then the review link
 npm run deploy -- --skip-walks        # while matching the design; never the deploy before a report
+npm run deploy -- --small --page /x   # fast lane: a copy fix or a few lines in one file, checks that page only
+shopify theme pull --live             # Live Sync: allowed when the theme folders have nothing uncommitted
 npm run approve -- --by "Name"        # a PERSON, in their own terminal, after checking the review link and any changed pictures
 npm run release                       # approved code onto the live theme, same theme id
 ```
@@ -1033,7 +1057,7 @@ loudly. A silent skip exiting 0 is the bug it exists to catch.
 
 | Guard | Fails on |
 | --- | --- |
-| `no-live-push.mjs` | `--live`, `--allow-live` or `theme publish` in any script or workflow |
+| `no-live-push.mjs` | `--live`, `--allow-live`, `--publish`, their short forms (`push -l`, `-a`, `-p`) or `theme publish` in any script or workflow |
 | `merchant-files-are-not-pushed.mjs` | a push not excluding `config/settings_data.json` and `templates/*.json` |
 | `no-committed-secrets.mjs` | a token, a client secret, a committed `.env` |
 | `one-api-version.mjs` | an API version outside the module that owns it |
@@ -1046,6 +1070,7 @@ loudly. A silent skip exiting 0 is the bug it exists to catch.
 | `a-webhook-is-idempotent.mjs` | a handler with no idempotency key |
 | `a-mutation-reads-its-errors.mjs` | `userErrors` never checked |
 | `theme-check-clean.mjs` | new offences above a baseline that may only fall |
+| `translation-keys-exist.mjs` (in the kit) | a `'key' \| t` the default locale file lacks, which shows "Translation missing" |
 
 For a rule arriving late, use the baseline pattern: commit the current violation
 count per file and fail when one goes up. The backlog only falls.
@@ -1061,9 +1086,12 @@ branch merges into main.
 `scripts/qa/ship-gate.mjs` enforces it as a `PreToolUse` hook on Bash, Write and Edit (wired in
 `.claude/settings.json`) and denies the tool call for:
 
-1. **Publishing.** `theme publish`, `theme delete`, `--live`, `--allow-live`. No
-   bypass, except publishing or a live push on a development store, which the
-   gate confirms with Shopify (`scripts/dev-store.mjs`). `theme delete` has none.
+1. **Publishing.** `theme publish`, `theme delete`, `--live`, `--allow-live`, `--publish`, the
+   short forms (`push -l`, `-a`, `-p`, `dev -a`) and an `--environment` whose
+   `shopify.theme.toml` turns any of them on. No bypass, except publishing or a live push on a
+   development store, which the gate confirms with Shopify (`scripts/dev-store.mjs`).
+   `theme delete` has none. A pull from live (`theme pull --live` or `-l`) with nothing that
+   writes in the same command is allowed when the theme folders have no uncommitted changes.
    Approved work goes live through `npm run release`, not through these.
 2. **A push carrying merchant files.** Denied until `.shopifyignore` covers them
    or the push names its files with `--only`. No bypass.
@@ -1098,7 +1126,10 @@ preview link").
    since the approval or its last full QA pass, or the reviews are not stamped. It pushes only the code that differs from
    live, plus templates live does not have yet. It never touches a template or settings file live
    already has, and it stops if live holds a file this repo has never seen, bringing that file
-   into `.theme-incoming/` to merge. The live theme keeps its id.
+   into `.theme-incoming/` to merge. For a locale file live already has, it adds only the text
+   keys live lacks to live's own copy and leaves every value live has as it is (the client edits
+   those wording changes in the editor), and it lists any repo wording it did not send. The live
+   theme keeps its id.
 4. Merge the branch into main and commit `releases.log` (who approved what, when).
 
 Check the live site after the release and say what customers now see.

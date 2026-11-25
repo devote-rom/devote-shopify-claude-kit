@@ -7,7 +7,10 @@
 //   npm run deploy                   # QA, push code, then carry-over, forms, SEO, accessibility, widths, browsers, visual,
 //                                    # live comparison, journeys and speed on the preview
 //   npm run deploy -- --skip-walks   # while iterating: no SEO or speed, and it says so (not for handover)
+//   npm run deploy -- --small --page /products/x   # fast lane for a small change: checks that one page
+//                                    # only, and the QA pass says what did not run (scripts/small-change.mjs)
 //   npm run deploy -- --with-json    # also push your template/settings changes, only if safe
+//                                    # (changed locales/*.json go on every deploy, once the editor check passes)
 //   npm run deploy -- --pull         # just bring editor changes and other people's code into the repo
 //                                    # (never over a file of yours: with no record of the last sync,
 //                                    # the theme's copy of a file you also have goes in .theme-incoming/)
@@ -41,6 +44,7 @@ import { checkStore } from "./dev-store.mjs";
 import { servesShopify, unlock as unlockStorefront, walkTarget } from "./qa/preview-session.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { CODE_GLOBS, classify, codeFilesIn, hashFile } from "./theme-sync.mjs";
+import { lineChanges, smallNotRun, smallVerdict } from "./small-change.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const arg = (name) => flag(name);
@@ -62,6 +66,13 @@ const ONLY_JSON = arg("--json") ? arg("--json").split(",").map((f) => f.trim()).
 const DOMAIN = (arg("--domain") || process.env.SHOP_DOMAIN || "").replace(/^https?:\/\//, "").replace(/\/$/, "");
 const SKIP_WALKS = process.argv.includes("--skip-walks");
 const FIRST_SYNC = process.argv.includes("--first-sync");
+const SMALL = process.argv.includes("--small");
+const PAGES = (arg("--page") || "").split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith("/") ? p : `/${p}`));
+if (SMALL) {
+  if (WITH_JSON || SKIP_WALKS || PULL_ONLY) { console.log("--small cannot go with --with-json, --skip-walks or --pull: template JSON never takes the fast lane, and the fast lane is a real check. Stopping."); process.exit(1); }
+  if (!PAGES.length) { console.log("--small needs the page the change shows on: npm run deploy -- --small --page /products/<handle> (comma-separate up to three). Stopping."); process.exit(1); }
+  if (PAGES.length > 3) { console.log("--small checks up to three pages. More than that is not a small change: run a full npm run deploy. Stopping."); process.exit(1); }
+}
 const CODE_BASELINE = join(ROOT, ".theme-baseline.json");
 const INCOMING = join(ROOT, ".theme-incoming");
 
@@ -239,6 +250,18 @@ if (PULL_ONLY || editedInEditor.length) {
   process.exit(0);
 }
 
+// 1b. The fast lane takes small changes only (scripts/small-change.mjs). Checked against what the theme
+// holds now, before anything is pushed.
+if (SMALL) {
+  const changes = Object.keys(localCode).filter((f) => remoteCode[f] !== localCode[f]).map((f) => (
+    f in remoteCode ? { path: f, ...lineChanges(join(codeRemoteDir, f), join(ROOT, f)) } : { path: f, isNew: true }
+  ));
+  for (const f of list(ROOT).filter((f) => f.startsWith("locales/") && remoteHashes[f] !== hash(join(ROOT, f)))) changes.push({ path: f });
+  const small = smallVerdict(changes);
+  if (!small.ok) { console.log(`Not a small change: ${small.why}. Run a full npm run deploy.`); process.exit(1); }
+  console.log(`Fast lane: ${changes.map((c) => c.path).join(", ")}. Only ${PAGES.join(", ")} will be checked.`);
+}
+
 // 2. Code only ships after /code-review and /security-review have seen it (scripts/review-stamp.mjs).
 const review = reviewStatus();
 if (!review.ok) {
@@ -292,10 +315,13 @@ process.on("exit", () => {
 // The theme now holds this repo's code: that is the new last sync.
 saveCodeBase({ ...remoteCode, ...localCode });
 
-// 4. Optionally, your own editor-file changes, now that the theme is known to be untouched.
-if (WITH_JSON) {
-  const mine = list(ROOT).filter((f) => remoteHashes[f] !== hash(join(ROOT, f)) && (!ONLY_JSON || ONLY_JSON.includes(f)));
-  if (!mine.length) console.log("No template or settings changes of yours to push.");
+// 4. Your own editor-file changes, now that the theme is known to be untouched since the last sync.
+// Changed locale files always go: they hold the text keys the code just pushed prints, and without
+// them the preview showed "Translation missing" until someone pushed them by hand (Rom, 25 Nov 2026).
+// Templates and settings go only with --with-json.
+{
+  const mine = list(ROOT).filter((f) => remoteHashes[f] !== hash(join(ROOT, f)) && (f.startsWith("locales/") || (WITH_JSON && (!ONLY_JSON || ONLY_JSON.includes(f)))));
+  if (!mine.length) { if (WITH_JSON) console.log("No template or settings changes of yours to push."); }
   else {
     const stage = mkdtempSync(join(tmpdir(), "editor-push-"));
     for (const f of mine) { mkdirSync(dirname(join(stage, f)), { recursive: true }); cpSync(join(ROOT, f), join(stage, f)); }
@@ -337,16 +363,20 @@ if (PRELAUNCH) {
 // The state pages (sold out, on sale, most variants, 404, cart...) the walks also open
 // (scripts/qa/page-list.mjs). Found from live when missing or a month old; could not look means the
 // walks run without them, and the QA pass says so.
-const notRun = PRELAUNCH ? ["live comparison", "journeys"] : [];
+const notRun = SMALL ? smallNotRun(PAGES) : PRELAUNCH ? ["live comparison", "journeys"] : [];
 const stateAge = stateAgeDays();
-if (!PRELAUNCH && (stateAge === null || stateAge > 30)) {
+if (!SMALL && !PRELAUNCH && (stateAge === null || stateAge > 30)) {
   console.log("\nFinding sold-out, sale and other state pages on live (design/state-pages.json)");
   const r = spawnSync(process.execPath, [join(ROOT, "scripts/qa/find-state-pages.mjs")], { cwd: ROOT, stdio: "inherit", env: { ...process.env, SHOP_DOMAIN: DOMAIN } });
   if (r.status !== 0) notRun.push("sold-out, sale and other product state pages");
 }
 const failedWalks = [];
 let visualToLook = 0;
-for (const [label, script, env] of [
+const ONLY = PAGES.join(",");
+for (const [label, script, env] of SMALL ? [
+  ["visual", "scripts/qa/visual-walk.mjs", { PREVIEW_URL, VISUAL_PAGES: ONLY }],
+  ["accessibility", "scripts/qa/a11y-walk.mjs", { PREVIEW_URL, A11Y_PAGES: ONLY }],
+] : [
   ["carry-over", "scripts/qa/carryover-walk.mjs", { SHOPIFY_STORE: STORE, THEME_ID: THEME, SHOP_DOMAIN: DOMAIN, CARRYOVER_BASE: new URL(PREVIEW_URL).origin }],
   ["forms", "scripts/qa/forms-walk.mjs", { PREVIEW_URL, LIVE_URL: target.liveUrl }],
   ["SEO", "scripts/qa/seo-walk.mjs", { PREVIEW_URL }],
@@ -380,7 +410,13 @@ if (process.env.SKIP_QA === "1") {
 }
 let commit = null;
 try { commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
-writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun });
+writeQaPass({ codeHash: PUSHED_HASH, store: STORE, theme: THEME, commit, visualPending: readVisualPending(), notRun, ...(SMALL ? { lane: "small", pages: PAGES } : {}) });
+if (SMALL) {
+  console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"} by the fast lane. QA, code review, security review, and visual and accessibility on ${PAGES.join(", ")} passed.`);
+  console.log(`NOT CHECKED: ${notRun.join(", ")}. Say so in the handover.`);
+  if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one.`);
+  process.exit(0);
+}
 console.log(`\nPushed to the ${TARGET_IS_LIVE ? "development store's live theme" : "preview"}. QA, code review, security review, carry-over, forms, SEO, accessibility, widths, Safari, Firefox and phones, visual${PRELAUNCH ? "" : ", live comparison, journeys"} and speed all passed.`);
 if (notRun.length) console.log(`NOT CHECKED: ${notRun.join(", ")}${PRELAUNCH ? " (the live address still serves the old site)" : ""}. Say so in the handover.`);
 if (visualToLook) console.log(`${visualToLook} picture(s) changed or are new (parity/visual/pending.json). The person approving looks at each one; npm run approve asks them to confirm it.`);
