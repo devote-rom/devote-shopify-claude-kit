@@ -29,7 +29,7 @@
 //     --with-json, your changed editor files are pushed too, and the baseline moves on.
 // Target: --store and --theme, or SHOPIFY_STORE and THEME_ID. Set them in package.json's deploy script.
 import { execFileSync, spawnSync } from "node:child_process";
-import { VISUAL_PENDING, clearQaPass, readQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
+import { VISUAL_BASE, VISUAL_OUT, VISUAL_PENDING, clearQaPass, readVisualPending, writeQaPass } from "./qa-pass.mjs";
 import { stateAgeDays } from "./qa/page-list.mjs";
 import { THROTTLED_MESSAGE, throttled } from "./qa/pace.mjs";
 import { createHash } from "node:crypto";
@@ -256,13 +256,15 @@ if (PULL_ONLY || editedInEditor.length) {
 let PREVIOUS_PENDING = [];
 if (SMALL) {
   const liveDir = mkdtempSync(join(tmpdir(), "small-live-"));
-  run(["theme", "pull", "--store", STORE, "--theme", String(liveIds[0]), "--path", liveDir, ...CODE_GLOBS.flatMap((g) => ["--only", g]), "--only", "locales/*.json"]);
+  run(["theme", "pull", "--store", STORE, "--theme", String(liveIds[0]), "--path", liveDir, ...[...CODE_GLOBS, ...EDITOR_GLOBS].flatMap((g) => ["--only", g])]);
   const liveCode = Object.fromEntries(codeFilesIn(liveDir).map((f) => [f, hashFile(join(liveDir, f))]));
   if (!Object.keys(liveCode).length) { console.log("Pulled no code from the live theme, so it is not known how big this change is. Run a full npm run deploy."); process.exit(1); }
   const changes = Object.keys(localCode).filter((f) => liveCode[f] !== localCode[f]).map((f) => (
     f in liveCode ? { path: f, ...lineChanges(join(liveDir, f), join(ROOT, f)) } : { path: f, isNew: true }
   ));
   for (const f of list(ROOT).filter((f) => f.startsWith("locales/") && (!existsSync(join(liveDir, f)) || hash(join(liveDir, f)) !== hash(join(ROOT, f))))) changes.push({ path: f });
+  // release also pushes any template or settings file live does not have yet, so those count too
+  for (const f of list(ROOT).filter((f) => !f.startsWith("locales/") && !existsSync(join(liveDir, f)))) changes.push({ path: f, isNew: true });
   const small = smallVerdict(changes);
   if (!small.ok) { console.log(`Not a small change: ${small.why}. Run a full npm run deploy.`); process.exit(1); }
   console.log(`Fast lane: ${changes.map((c) => c.path).join(", ")}. Only ${PAGES.join(", ")} will be checked.`);
@@ -295,9 +297,6 @@ for (const g of ["templates/*.json", "config/settings_data.json", "sections/*.js
   if (!ignore.includes(g)) { console.log(`.shopifyignore must list ${g}. Stopping before a push that could carry editor files.`); process.exit(1); }
 }
 // The theme is about to change, so any earlier QA pass no longer describes it (scripts/qa-pass.mjs).
-// The fast lane walks a few pages only, so pictures the last pass still had for a person to look at
-// on other pages stay on the list (the visual walk rewrites pending.json with just its own).
-if (SMALL) { const prev = readQaPass(); if (prev && prev.store === STORE && String(prev.theme) === String(THEME)) PREVIOUS_PENDING = prev.visualPending || []; }
 clearQaPass();
 const PUSHED_HASH = codeHash();
 pushChecked(["theme", "push", "--store", STORE, "--theme", THEME, "--nodelete"], { cwd: ROOT });
@@ -382,6 +381,13 @@ if (!SMALL && !PRELAUNCH && (stateAge === null || stateAge > 30)) {
 const failedWalks = [];
 let visualToLook = 0;
 const ONLY = PAGES.join(",");
+// The fast lane walks a few pages only, and the visual walk rewrites pending.json with just its own
+// shots. Pictures still waiting for a person on other pages stay on the list; one the approver already
+// accepted (its picture is the baseline now) drops off.
+if (SMALL) {
+  const accepted = (s) => existsSync(join(VISUAL_BASE, `${s}.png`)) && existsSync(join(VISUAL_OUT, `${s}.png`)) && hashFile(join(VISUAL_BASE, `${s}.png`)) === hashFile(join(VISUAL_OUT, `${s}.png`));
+  PREVIOUS_PENDING = readVisualPending().filter((s) => !accepted(s));
+}
 for (const [label, script, env] of SMALL ? [
   ["visual", "scripts/qa/visual-walk.mjs", { PREVIEW_URL, VISUAL_PAGES: ONLY }],
   ["accessibility", "scripts/qa/a11y-walk.mjs", { PREVIEW_URL, A11Y_PAGES: ONLY }],

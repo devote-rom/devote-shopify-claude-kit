@@ -105,15 +105,17 @@ A report never rests on a `--skip-walks` deploy.
 
 ### The fast lane for small changes
 
-A copy fix, or a few lines in one file of code the theme already runs, does not need every walk on
-every page. `npm run deploy -- --small --page /products/<handle>` (up to three pages, comma
+A copy fix, or a few lines in one section, snippet or block live already runs, does not need every
+walk on every page. `npm run deploy -- --small --page /products/<handle>` (up to three pages, comma
 separated) pushes to the brand's usual preview theme, then runs the visual walk (390, 768, 1024 and
 1440px) and the accessibility walk (390 and 1440px) on those pages only. It takes 5 to 10 minutes
 instead of about an hour, stays inside Shopify's rate limit and uses no new theme slot.
 
-It refuses, before pushing, anything that is not small (`scripts/small-change.mjs`): template or
-settings JSON, more than one code file, more than 20 changed lines, a new file, or any file or
-changed line that touches money, the cart or checkout. Those take a full deploy. The reviews and
+It refuses, before pushing, anything that is not small (`scripts/small-change.mjs`), measured
+against live because release ships everything that differs from live: template or settings JSON,
+anything in `layout/` or `assets/` (they reach every page), more than one code file, more than 20
+changed lines, a new file, or any file or changed line that touches money, the cart or checkout.
+Those take a full deploy. The reviews and
 `npm run qa` still run, and the QA pass it writes lists every walk that did not run, so the person
 approving sees exactly what was and was not checked. Then approve and release as usual: release
 pushes only the files that differ from live. Use the preview theme already in package.json; a
@@ -1127,8 +1129,9 @@ preview link").
    live, plus templates live does not have yet. It never touches a template or settings file live
    already has, and it stops if live holds a file this repo has never seen, bringing that file
    into `.theme-incoming/` to merge. For a locale file live already has, it adds only the text
-   keys live lacks to live's own copy and leaves every value live has as it is (the client edits
-   those wording changes in the editor), and it lists any repo wording it did not send. The live
+   keys live lacks, written into live's own text so its comments and translator notes stay, and
+   leaves every value live has as it is (the client edits that wording in the editor). It lists any
+   repo wording it did not send, and stops if a key the code prints would still be missing on live. The live
    theme keeps its id.
 4. Merge the branch into main and commit `releases.log` (who approved what, when).
 

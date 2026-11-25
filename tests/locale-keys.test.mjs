@@ -7,15 +7,13 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { differingValues, hasKey, insertMissingKeys, missingKeys, parseLocale, serializeLocale, translationKeys, withMissingKeys } from "../scripts/locale-keys.mjs";
+import { differingValues, hasKey, insertMissingKeys, missingKeys, parseLocale, translationKeys, withMissingKeys } from "../scripts/locale-keys.mjs";
 
 const KIT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("a locale file with Shopify's leading comment still reads, and keeps the comment", () => {
+test("a locale file with Shopify's leading comment still reads", () => {
   const text = "/*\n * ------------------------------------------------------------\n * IMPORTANT: The contents of this file are auto-generated.\n */\n{ \"general\": { \"close\": \"Close\" } }\n";
-  const l = parseLocale(text);
-  assert.equal(l.data.general.close, "Close");
-  assert.match(serializeLocale(l), /^\/\*[\s\S]*IMPORTANT[\s\S]*\*\/\n\{/);
+  assert.equal(parseLocale(text).data.general.close, "Close");
   assert.equal(parseLocale("{ not json"), null);
 });
 
@@ -24,8 +22,6 @@ test("// notes inside a locale file (Horizon themes) and trailing commas still r
   const l = parseLocale(text);
   assert.equal(l.data.a.menu, "Menu // not a comment");
   assert.equal(l.data.a.url, "https://x.com/a,}");
-  assert.equal(l.innerComments, true);
-  assert.equal(parseLocale('{ "a": "b" }').innerComments, false);
 });
 
 test("release adds only the keys live lacks and never changes live's wording", () => {
@@ -99,4 +95,17 @@ test("nothing to add leaves live's text exactly as it was", () => {
 test("keys in comment, doc and raw blocks are not used; a | t on the next line is", () => {
   const liquid = "{% doc %}\n  {{ 'example.only' | t }}\n{% enddoc %}\n{% comment %}{{ 'old.key' | t }}{% endcomment %}\n{%- raw -%}{{ 'raw.key' | t }}{%- endraw -%}\n{{ 'real.key'\n  | t }}";
   assert.deepEqual(translationKeys(liquid), [{ key: "real.key", line: 6 }]);
+});
+
+test("insertion keeps a same-line note with its group, CRLF line endings, and inherited names are real keys", () => {
+  const live = '{\r\n  "a": { // translator note\r\n    "x": "1"\r\n  }\r\n}\r\n';
+  const out = insertMissingKeys(live, { a: { x: "1", y: "2", constructor: "C" } });
+  assert.match(out, /\{ \/\/ translator note\r\n    "y": "2"/);
+  assert.doesNotMatch(out.replace(/\r\n/g, ""), /\n/, "no bare LF");
+  assert.equal(parseLocale(out).data.a.constructor, "C");
+  assert.deepEqual(missingKeys({ toString: "t" }, {}), ["toString"]);
+});
+
+test("keys in inline {% # %} comments are not used", () => {
+  assert.deepEqual(translationKeys("{% # {{ 'old.key' | t }} %}\n{{ 'new.key' | t }}"), [{ key: "new.key", line: 2 }]);
 });

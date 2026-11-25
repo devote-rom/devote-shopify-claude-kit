@@ -122,7 +122,7 @@ function stepGoesLive(step, root) {
 
 // A backslash at the end of a line continues the command, so join those first: otherwise a flag on
 // the next line is a step of its own and the short-flag check never sees it with its push.
-const steps = (cmd) => cmd.replace(/\\\r?\n/g, " ").split(/&&|\|\||[;&|\n`]|\$\(/);
+const steps = (cmd) => cmd.replace(/(?<!\\)((?:\\\\)*)\\\r?\n/g, "$1 ").split(/&&|\|\||[;&|\n`]|\$\(/);
 
 export function isPublish(command, { root = ROOT } = {}) {
   return steps(executablePart(command)).some((s) => stepGoesLive(s, root));

@@ -2,9 +2,9 @@
 //
 // Exists because new or renamed text keys reached the preview and live after the code that used
 // them, so pages showed "Translation missing" until someone pushed the locale files by hand (Rom,
-// 25 Nov 2026). Deploy now pushes changed locale files with the code, and release adds the keys
-// live does not have yet to live's own copy, leaving every value live already has as it is: the
-// client edits that wording under Edit default theme content.
+// 25 Nov 2026). Deploy now pushes changed locale files with the code, and release writes the keys
+// live does not have yet into live's own text, leaving every value, comment and line live already
+// has as it is: the client edits that wording under Edit default theme content.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -26,18 +26,9 @@ export function stripJsonComments(text) {
   return out;
 }
 
-/**
- * A locale file's leading comment (Shopify writes one on some themes), its data, and whether it held
- * other comments (which serializeLocale cannot keep). Null if unreadable.
- */
+/** A locale file's data, with Shopify's comments allowed. Null if unreadable. To write one, use insertMissingKeys, which keeps the file's own text. */
 export function parseLocale(text) {
-  const m = String(text).match(/^\s*(\/\*[\s\S]*?\*\/)?([\s\S]*)$/);
-  const body = stripJsonComments(m[2]);
-  try { return { comment: m[1] || "", data: JSON.parse(body), innerComments: body.replace(/\s/g, "") !== m[2].replace(/\s/g, "") }; } catch { return null; }
-}
-
-export function serializeLocale({ comment, data }) {
-  return (comment ? comment + "\n" : "") + JSON.stringify(data, null, 2) + "\n";
+  try { return { data: JSON.parse(stripJsonComments(String(text))) }; } catch { return null; }
 }
 
 const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
@@ -47,7 +38,7 @@ export function missingKeys(from, into, prefix = "") {
   const out = [];
   for (const [k, v] of Object.entries(from || {})) {
     const key = prefix ? `${prefix}.${k}` : k;
-    if (!isObj(into) || !(k in into)) out.push(key);
+    if (!isObj(into) || !Object.hasOwn(into, k)) out.push(key);
     else if (isObj(v) && isObj(into[k])) out.push(...missingKeys(v, into[k], key));
   }
   return out;
@@ -58,7 +49,7 @@ export function differingValues(from, into, prefix = "") {
   const out = [];
   for (const [k, v] of Object.entries(from || {})) {
     const key = prefix ? `${prefix}.${k}` : k;
-    if (!isObj(into) || !(k in into)) continue;
+    if (!isObj(into) || !Object.hasOwn(into, k)) continue;
     if (isObj(v) && isObj(into[k])) out.push(...differingValues(v, into[k], key));
     else if (JSON.stringify(v) !== JSON.stringify(into[k])) out.push(key);
   }
@@ -69,7 +60,7 @@ export function differingValues(from, into, prefix = "") {
 export function withMissingKeys(into, from) {
   const out = structuredClone(into);
   for (const [k, v] of Object.entries(from || {})) {
-    if (!(k in out)) out[k] = structuredClone(v);
+    if (!Object.hasOwn(out, k)) out[k] = structuredClone(v);
     else if (isObj(v) && isObj(out[k])) out[k] = withMissingKeys(out[k], v);
   }
   return out;
@@ -116,11 +107,13 @@ export function insertMissingKeys(text, from) {
   const live = parseLocale(text);
   if (!live) return null;
   const objs = objectsIn(text);
-  const unit = (text.match(/\n([ \t]+)"/) || [, "  "])[1];
+  const nl = text.includes("\r\n") ? "\r\n" : "\n";
+  // the indent step, read from the first key line outside the leading comment
+  const unit = (text.replace(/^\s*\/\*[\s\S]*?\*\//, "").match(/\n([ \t]+)"/) || [, "  "])[1];
   const groups = new Map();
   const walk = (src, into, path) => {
     for (const [k, v] of Object.entries(src || {})) {
-      if (!(k in into)) { const id = JSON.stringify(path); if (!groups.has(id)) groups.set(id, []); groups.get(id).push([k, v]); }
+      if (!Object.hasOwn(into, k)) { const id = JSON.stringify(path); if (!groups.has(id)) groups.set(id, []); groups.get(id).push([k, v]); }
       else if (isObj(v) && isObj(into[k])) walk(v, into[k], [...path, k]);
     }
   };
@@ -130,8 +123,10 @@ export function insertMissingKeys(text, from) {
     const o = objs.get(id);
     if (!o) return null;
     const indent = unit.repeat(o.path.length + 1);
-    const body = entries.map(([k, v]) => `\n${indent}${JSON.stringify(k)}: ${JSON.stringify(v, null, unit).replace(/\n/g, "\n" + indent)}`).join(",");
-    edits.push({ at: o.open, add: body + (o.members ? "," : "\n" + unit.repeat(o.path.length)) });
+    const body = entries.map(([k, v]) => `${nl}${indent}${JSON.stringify(k)}: ${JSON.stringify(v, null, unit).replace(/\n/g, nl + indent)}`).join(",");
+    // after a note on the same line as the brace ({ // note), so the note stays with its group
+    const sameLine = text.slice(o.open).match(/^[ \t]*\/\/[^\r\n]*/);
+    edits.push({ at: o.open + (sameLine ? sameLine[0].length : 0), add: body + (o.members ? "," : nl + unit.repeat(o.path.length)) });
   }
   let out = text;
   for (const e of edits.sort((a, b) => b.at - a.at)) out = out.slice(0, e.at) + e.add + out.slice(e.at);
@@ -143,7 +138,7 @@ export function insertMissingKeys(text, from) {
 export function hasKey(data, key) {
   let cur = data;
   for (const part of key.split(".")) {
-    if (!isObj(cur) || !(part in cur)) return false;
+    if (!isObj(cur) || !Object.hasOwn(cur, part)) return false;
     cur = cur[part];
   }
   return true;
@@ -152,9 +147,9 @@ export function hasKey(data, key) {
 // 'a.b' | t, "a.b" | t: and | translate. Keys Shopify provides itself start with shopify.
 const T_KEY = /(['"])([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)+)\1\s*\|\s*(?:t|translate)\b/g;
 
-// Comment, doc and raw blocks print nothing, so example keys inside them are not used. Blanked to
+// Comment, doc and raw blocks, and inline {% # %} comments, print nothing, so example keys inside them are not used. Blanked to
 // spaces so line numbers stay right.
-const NOT_RENDERED = /\{%-?\s*(comment|doc|raw)\s*-?%\}[\s\S]*?\{%-?\s*end\1\s*-?%\}/g;
+const NOT_RENDERED = /\{%-?\s*(comment|doc|raw)\s*-?%\}[\s\S]*?\{%-?\s*end\1\s*-?%\}|\{%-?\s*#[\s\S]*?%\}/g;
 
 /** Text keys a Liquid file prints with | t (the filter may sit on the next line), with their line numbers. */
 export function translationKeys(liquid) {

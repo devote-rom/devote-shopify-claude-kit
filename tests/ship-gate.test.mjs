@@ -111,6 +111,11 @@ test("live pull: anything that writes to live in the same command is not a pull"
   ]) assert.equal(isLivePullOnly(cmd), false, cmd);
 });
 
+test("an escaped backslash at a line end is not a continuation", () => {
+  assert.equal(isLivePullOnly("echo foo \\\\\nshopify theme pull --live"), true);
+  assert.equal(isPublish("echo done \\\\\nshopify theme push --unpublished"), false);
+});
+
 test("live pull: uncommitted theme work blocks it, a clean tree does not", () => {
   assert.deepEqual(themeFoldersDirty({ status: () => "" }).files, []);
   assert.deepEqual(themeFoldersDirty({ status: () => " M sections/header.liquid\n?? snippets/new.liquid\n" }).files, ["sections/header.liquid", "snippets/new.liquid"]);

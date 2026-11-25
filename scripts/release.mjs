@@ -23,7 +23,7 @@ import { pushResult, themeList } from "./shopify-json.mjs";
 import { codeHash, reviewStatus } from "./review-stamp.mjs";
 import { qaPassVerdict, readQaPass } from "./qa-pass.mjs";
 import { CODE_GLOBS, codeFilesIn, hashFile } from "./theme-sync.mjs";
-import { differingValues, insertMissingKeys, missingKeys, parseLocale } from "./locale-keys.mjs";
+import { defaultLocaleFile, differingValues, hasKey, insertMissingKeys, missingKeys, parseLocale, translationKeys } from "./locale-keys.mjs";
 
 const target = deployTarget();
 if (!target.store) { console.log("package.json's deploy script has no --store. Stopping."); process.exit(1); }
@@ -114,6 +114,23 @@ for (const f of editorIn(ROOT).filter((f) => f.startsWith("locales/") && liveEdi
   const text = insertMissingKeys(readFileSync(join(liveEditor, f), "utf8"), mine.data);
   if (!text) { console.log(`Not releasing: the new text keys (${added.slice(0, 6).join(", ")}) could not be added to live's ${f} without changing anything else in it. Add them to live's copy by hand in the theme editor (Edit default theme content), then release.`); process.exit(1); }
   localeMerges.push({ f, added, text });
+}
+// Every key the code prints, that the repo's default locale has, must resolve on live after this. A key
+// that is text on live and a group in the repo (or the reverse) is neither added nor changed above.
+{
+  const def = defaultLocaleFile(ROOT);
+  const liveDefault = def && (localeMerges.find((m) => m.f === def)?.text ?? (existsSync(join(liveEditor, def)) ? readFileSync(join(liveEditor, def), "utf8") : null));
+  const mineDefault = def && parseLocale(readFileSync(join(ROOT, def), "utf8"));
+  const liveData = liveDefault && parseLocale(liveDefault);
+  if (mineDefault && liveData) {
+    const printed = codeFilesIn(ROOT).filter((f) => f.endsWith(".liquid")).flatMap((f) => translationKeys(readFileSync(join(ROOT, f), "utf8")).map((k) => k.key));
+    const broken = [...new Set(printed)].filter((k) => hasKey(mineDefault.data, k) && !hasKey(liveData.data, k));
+    if (broken.length) {
+      console.log(`Not releasing: live's ${def} would still lack ${broken.length} text key(s) the code prints, so live would show "Translation missing": ${broken.slice(0, 8).join(", ")}`);
+      console.log("Each is text on live where the repo has a group, or the reverse. Rename the key in the code and the repo's locale file so it does not clash with live's, deploy, get a new approval, then release.");
+      process.exit(1);
+    }
+  }
 }
 
 const files = [...changed, ...newTemplates, ...localeMerges.map((m) => m.f)];
