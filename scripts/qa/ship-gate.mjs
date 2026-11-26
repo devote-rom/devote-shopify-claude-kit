@@ -73,7 +73,8 @@ const MERGE = /(?:^|[;&|]\s*)gh\s+pr\s+merge\b/;
 // Only git's own options may sit between git and push (git -C dir push). Any other word is a
 // subcommand, so git stash push is a stash, not a push.
 const GIT_OPTIONS = String.raw`(?:(?:-C|-c|--git-dir|--work-tree|--namespace)\s+(?:"[^"]*"|'[^']*'|\S+)\s+|--?[A-Za-z][\w-]*(?:=\S+)?\s+)*`;
-const PUSH = new RegExp(String.raw`(?:^|[;&|]\s*)git\s+` + GIT_OPTIONS + String.raw`push\b`);
+// An environment prefix (GIT_SSH_COMMAND=... git push) is still a push.
+const PUSH = new RegExp(String.raw`(?:^|[;&|]\s*)(?:[A-Za-z_]\w*=(?:"[^"]*"|'[^']*'|\S*)\s+)*git\s+` + GIT_OPTIONS + String.raw`push\b`);
 export function isGitPush(command) {
   return PUSH.test(command);
 }
@@ -337,12 +338,12 @@ export function mergeVerdict({ files = [], body = "", checks = [] } = {}) {
 // Rule 5: an approval is a person's. `npm run release` puts approved work on the live theme, and
 // the approval is the only thing standing between a preview and customers, so Claude may never
 // make one: not by running approve, not by writing the file it records (scripts/approval.mjs).
-// A git step that only stages, commits or shows files, with no redirect, makes no approval: committing
+// A git step that only stages, commits or shows files, with no redirect or --output file, makes no approval: committing
 // a kit update has to git add scripts/approve.mjs (26 Nov 2026).
 const APPROVE = /(?:npm\s+run\s+approve\b|scripts\/approve\.mjs|release-approval)/;
 const GIT_READ_OR_STAGE = new RegExp(String.raw`^\s*git\s+` + GIT_OPTIONS + String.raw`(?:add|commit|diff|show|log|status|blame)\b`);
 export function makesApproval(command) {
-  return steps(executablePart(command)).some((s) => APPROVE.test(s) && !(GIT_READ_OR_STAGE.test(s) && !/>/.test(s)));
+  return steps(executablePart(command)).some((s) => APPROVE.test(s) && !(GIT_READ_OR_STAGE.test(s) && !/>|--output\b/.test(s)));
 }
 export function writesApprovalFile(filePath) {
   return /(^|\/)\.release-approval\.json$/.test(String(filePath || ""));

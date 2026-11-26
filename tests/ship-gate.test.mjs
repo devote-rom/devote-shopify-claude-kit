@@ -51,6 +51,7 @@ test("rule 5: releasing, deploying and other files stay allowed", () => {
     "git add scripts/approve.mjs && npm run approve -- --by A",
     "git show HEAD:.release-approval.json > .release-approval.json",
     "git checkout -- .release-approval.json",
+    "git diff --output=.release-approval.json HEAD~1 -- scripts/approve.mjs",
   ]) assert.equal(makesApproval(cmd), true, cmd);
   assert.equal(writesApprovalFile("/Users/a/repo/scripts/approval.mjs"), false);
   assert.equal(writesApprovalFile("/Users/a/repo/releases.log"), false);
@@ -64,6 +65,7 @@ test("rule 4: a git push is checked, a git stash push is not", () => {
     "cd theme && git push -u origin hotfix/x",
     'git -C "/Users/a/Client Themes/acme" push origin develop',
     "git -c core.sshCommand=ssh --no-pager push",
+    "GIT_SSH_COMMAND='ssh -i key' git push origin main",
   ]) assert.equal(isGitPush(cmd), true, cmd);
   for (const cmd of ["git stash push -- snippets", "git stash push -m 'before Live Sync' -- sections", "git status", "shopify theme push --unpublished"]) {
     assert.equal(isGitPush(cmd), false, cmd);
