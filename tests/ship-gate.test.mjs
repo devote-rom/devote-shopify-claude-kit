@@ -16,6 +16,7 @@ import {
   mergeTargets,
   makesApproval,
   writesApprovalFile,
+  isGitPush,
   isLivePullOnly,
   themeFoldersDirty,
 } from "../scripts/qa/ship-gate.mjs";
@@ -39,9 +40,36 @@ test("rule 5: releasing, deploying and other files stay allowed", () => {
   for (const cmd of ["npm run release", "npm run deploy", "npm run deploy -- --skip-walks", "git commit -m 'Release'"]) {
     assert.equal(makesApproval(cmd), false, cmd);
   }
+  for (const cmd of [
+    "git add scripts/approve.mjs",
+    'git -C "/Users/a/Client Themes/acme" add scripts/approve.mjs tests/approval.test.mjs',
+    "git diff -- scripts/approve.mjs",
+    "git show HEAD:scripts/approve.mjs",
+    "git commit -m 'Devote Shopify kit 1.2.3' && git log --stat -1 -- scripts/approve.mjs",
+  ]) assert.equal(makesApproval(cmd), false, cmd);
+  for (const cmd of [
+    "git add scripts/approve.mjs && npm run approve -- --by A",
+    "git show HEAD:.release-approval.json > .release-approval.json",
+    "git checkout -- .release-approval.json",
+    "git diff --output=.release-approval.json HEAD~1 -- scripts/approve.mjs",
+  ]) assert.equal(makesApproval(cmd), true, cmd);
   assert.equal(writesApprovalFile("/Users/a/repo/scripts/approval.mjs"), false);
   assert.equal(writesApprovalFile("/Users/a/repo/releases.log"), false);
   assert.equal(writesApprovalFile(""), false);
+});
+
+test("rule 4: a git push is checked, a git stash push is not", () => {
+  for (const cmd of [
+    "git push",
+    "git push origin main",
+    "cd theme && git push -u origin hotfix/x",
+    'git -C "/Users/a/Client Themes/acme" push origin develop',
+    "git -c core.sshCommand=ssh --no-pager push",
+    "GIT_SSH_COMMAND='ssh -i key' git push origin main",
+  ]) assert.equal(isGitPush(cmd), true, cmd);
+  for (const cmd of ["git stash push -- snippets", "git stash push -m 'before Live Sync' -- sections", "git status", "shopify theme push --unpublished"]) {
+    assert.equal(isGitPush(cmd), false, cmd);
+  }
 });
 
 const GREEN = [{ name: "theme-check", conclusion: "SUCCESS" }];
