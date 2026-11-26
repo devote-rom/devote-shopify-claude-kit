@@ -2,7 +2,7 @@
 // 20 Nov 2026: scripts read the first copy, and a release meant for one theme went to another.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { flag, flagValues } from "../scripts/platform.mjs";
@@ -20,7 +20,8 @@ test("the flag typed after npm run deploy -- wins over the script's own", () => 
 
 test("no kit script reads the first copy of a flag", () => {
   const files = (d) => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? files(join(d, f)) : f.endsWith(".mjs") ? [join(d, f)] : []));
-  const bad = [...files(join(KIT, "scripts")), ...files(join(KIT, "hooks"))]
+  const dirs = ["scripts", "hooks"].map((d) => join(KIT, d)).filter((d) => existsSync(d));
+  const bad = dirs.flatMap(files)
     .filter((f) => /process\.argv\.indexOf\(/.test(readFileSync(f, "utf8")));
   assert.deepEqual(bad.map((f) => f.slice(KIT.length + 1)), [], "use flag() from scripts/platform.mjs");
 });
